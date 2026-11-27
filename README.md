@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/TyronNA/devhub-for-claude-code)](https://github.com/TyronNA/devhub-for-claude-code/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![Dev Hub in VS Code: projects grouped by workspace in the sidebar, a Claude Code chat open on the right](https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/vscode.png)
+<p align="center"><img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/vscode.png" width="720" alt="Dev Hub in VS Code: projects grouped by workspace in the sidebar, a Claude Code chat open on the right"></p>
 
 > Unofficial and community-built. Not affiliated with or endorsed by Anthropic. "Claude" and
 > "Claude Code" are trademarks of Anthropic. Dev Hub drives the `claude` CLI you already have
@@ -22,25 +22,60 @@ and memory work exactly as they do in a terminal.
 
 ## Features
 
-- **Every repo in one sidebar.** Group projects into workspaces such as "Work" or "Side projects".
-  Start a chat in any project without opening it.
-- **Several agents at once.** Turns run in parallel up to a cap you set. Running sessions
-  show a live status, and you can jump between them from the keyboard.
-- **Your existing history.** Sessions you started in a terminal are found in `~/.claude` and can
-  be resumed from the sidebar.
-- **Approvals in the panel.** Tool permission requests appear as Allow / Deny cards. Every
-  request gets an answer (deny on timeout or when the tab closes), so the CLI never hangs.
-- **Usage you can see.** Context window, 5-hour and 7-day limits, and token cost for each turn,
-  read from the CLI's own events.
-- **Queue, images, slash commands.** Type the next prompt while a turn is running, paste
-  screenshots, and pick the model and effort for each session.
-- **Phone web app.** An optional page served on your local network shows the same chats,
-  approval cards and history on your phone. No app store, no cloud relay.
-- **Ports panel.** See which project owns each listening port. Open it, pin it or kill it.
+### Every project, one window
+- **Workspaces → projects → chats in one sidebar**, separate from the VS Code workspace. Nothing
+  gets indexed or file-watched, so 30 repos cost the same as one.
+- **Switch in a keystroke** (macOS keys; `Cmd` is the Super key on Linux). `Cmd+Alt+J` finds any
+  project and starts a chat in it. `Cmd+Shift+]` / `Cmd+Shift+[` jump between the sessions that
+  are running right now.
+- **Recent** lists the 8 newest chats across every workspace, running ones first, along with the
+  total memory of the live CLI processes.
+- **One tab per chat.** Tabs survive **Reload Window**, and the header shows the branch with
+  `↑ahead ↓behind`.
+- Chats you started in a terminal are picked up from `~/.claude` and can be resumed here.
 
-| On your phone | Session history |
-|---|---|
-| <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-chat.png" width="300" alt="Mobile web app showing the same chat and approval card"> | <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-history.png" width="300" alt="Mobile web app history drawer listing sessions across projects"> |
+### A chat that shows what the agent made
+- **Images and video render inline.** When the agent names a PNG, JPEG, GIF, WebP, MP4, MOV or
+  WebM by path (a Playwright screenshot, a recorded demo, a generated GIF), it plays right in the
+  reply. Audio plays when the agent hands it over as a video file. This works on the phone too.
+- **Paste screenshots** into the prompt.
+- **Readable tool runs.** Each tool call is one line and long output folds behind `+N lines`.
+  Sub-agents are labelled by their task, and background commands report back after the turn
+  ends.
+- **Questions become buttons.** When Claude asks you to choose, you tap an answer instead of
+  typing it.
+
+### Nothing hangs, nothing gets lost
+- **Queue while it works.** Prompts you send during a turn wait their turn. **Stop** ends the
+  turn and keeps the queue.
+- **Every approval gets an answer.** Allow / Deny cards appear in the panel, and a timeout or a
+  closed tab sends a deny, so the CLI never blocks.
+- **Notifications** when a turn finishes or needs approval while you are looking at something
+  else.
+
+### Limits at a glance
+- **Rings show what is left**: context window, 5-hour and 7-day quota. Click the context ring to
+  compact.
+- A **prompt-cache chip** shows whether the next turn is cheap (`cache 50m`) or `cold`.
+- Model and thinking effort are set per chat and remembered.
+
+### On your phone
+- **The same chats on a phone web page** over your local network: streaming replies, approval
+  cards, history, images and video. Add it to the home screen like an app. No app store and no
+  cloud relay.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-chat.png" width="220" alt="Phone web app: the same chat with an approval card">
+  &nbsp;&nbsp;
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-history.png" width="220" alt="Phone web app: history drawer across projects">
+</p>
+
+### Extras
+- **Ports panel**: which project owns each listening port, with actions to open, pin or kill it.
+- **Artifacts**: a chat can publish a live page on claude.ai.
+- **Second Claude account per project** through a small wrapper script
+  ([details](docs/DESIGN.md#settings)).
+- A status bar hint when your `claude` CLI is out of date.
 
 ## Requirements
 
