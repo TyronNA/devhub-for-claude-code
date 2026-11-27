@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/TyronNA/devhub-for-claude-code/actions/workflows/ci.yml/badge.svg)](https://github.com/TyronNA/devhub-for-claude-code/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/TyronNA/devhub-for-claude-code)](https://github.com/TyronNA/devhub-for-claude-code/releases)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-007ACC)](https://marketplace.visualstudio.com/items?itemName=tyronna.dev-hub-claude-codex)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <picture>
@@ -21,10 +22,10 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-start-dark.png">
-  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-start-light.png" alt="Four steps: download the vsix, install it from the Extensions view, click the top row of the Dev Hub sidebar until it is gone (install Claude Code, log in, add a project), then start a chat.">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-start-light.png" alt="Four steps: search Dev Hub for Claude Code in the Extensions view, install it, click the top row of the Dev Hub sidebar until it is gone (install Claude Code, log in, add a project), then start a chat.">
 </picture>
 
-**[Download the .vsix](https://github.com/TyronNA/devhub-for-claude-code/releases)** · needs VS Code 1.95+, macOS or Linux, and a
+**[Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=tyronna.dev-hub-claude-codex)** (or `code --install-extension tyronna.dev-hub-claude-codex`) · needs VS Code 1.95+, macOS or Linux, and a
 Claude Pro / Max / Team / Enterprise plan (the free plan has no Claude Code).
 
 <details>

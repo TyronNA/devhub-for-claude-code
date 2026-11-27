@@ -100,8 +100,8 @@ hero:()=>`<section style="background:linear-gradient(135deg,var(--teal-soft),var
 start:()=>`<section>
   ${head('rocket','teal','Get started in 4 steps','No terminal needed. Dev Hub installs and signs in Claude Code for you.')}
   <div class="grid g4">
-    <div class="sc"><span class="num">1</span>${ic('download','blue')}<h3>Download</h3><ul><li><code>.vsix</code> from GitHub Releases</li></ul></div>
-    <div class="sc"><span class="num">2</span>${ic('puzzle','violet')}<h3>Install</h3><ul><li>Extensions view → <b>…</b> → <b>Install from VSIX…</b></li></ul></div>
+    <div class="sc"><span class="num">1</span>${ic('download','blue')}<h3>Find it</h3><ul><li>Extensions view (<kbd>⇧⌘X</kbd>)</li><li>Search <b>Dev Hub for Claude Code</b></li></ul></div>
+    <div class="sc"><span class="num">2</span>${ic('puzzle','violet')}<h3>Install</h3><ul><li>Click <b>Install</b></li><li>Open <b>Dev Hub</b> in the activity bar</li></ul></div>
     <div class="sc you"><span class="num">3</span>${ic('shield','amber')}<h3>Click the top row</h3><ul><li>Install Claude Code</li><li>Log in</li><li>Add a project</li></ul></div>
     <div class="sc"><span class="num">4</span>${ic('chat','teal')}<h3>Chat</h3><ul><li><b>New chat…</b> and type what you want done</li></ul></div>
   </div>
