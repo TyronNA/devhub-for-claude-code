@@ -1,0 +1,703 @@
+{
+  "name": "dev-hub-claude-codex",
+  "displayName": "Dev Hub for Claude Code",
+  "description": "Run Claude Code sessions across many repos from one VS Code window, plus a phone-friendly web page for the same chats. Unofficial; not affiliated with Anthropic.",
+  "version": "0.29.76",
+  "publisher": "local-devhub",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TyronNA/devhub-for-claude-code"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Dev Hub spawns the Claude CLI and runs agent commands from settings."
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:devHub.sessions",
+    "onCommand:devhub.openChat",
+    "onWebviewPanel:devHub.chat"
+  ],
+  "main": "./dist/src/extension.js",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "compile": "tsc -p tsconfig.json",
+    "test": "npm run compile && node --test dist/test/devhub/*.test.js",
+    "package": "npm run compile && node scripts/package-vsix.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "devhub.searchProject",
+        "title": "Dev Hub: Search Project & Start Chat",
+        "icon": "$(search)",
+        "shortTitle": "Search Project & Start Chat"
+      },
+      {
+        "command": "devhub.addWorkspace",
+        "title": "Dev Hub: Add Workspace",
+        "icon": "$(new-folder)",
+        "shortTitle": "Add Workspace"
+      },
+      {
+        "command": "devhub.renameWorkspace",
+        "title": "Dev Hub: Rename Workspace",
+        "icon": "$(edit)",
+        "shortTitle": "Rename Workspace"
+      },
+      {
+        "command": "devhub.addProject",
+        "title": "Dev Hub: Add Project",
+        "icon": "$(add)",
+        "shortTitle": "Add Project"
+      },
+      {
+        "command": "devhub.removeProject",
+        "title": "Dev Hub: Remove Project",
+        "icon": "$(trash)",
+        "shortTitle": "Remove Project"
+      },
+      {
+        "command": "devhub.switchClaudeAccount",
+        "title": "Dev Hub: Switch Claude Account",
+        "icon": "$(account)",
+        "shortTitle": "Switch Claude Account"
+      },
+      {
+        "command": "devhub.newClaudeChat",
+        "title": "Dev Hub: New Claude Chat",
+        "icon": {
+          "light": "media/claude-light.svg",
+          "dark": "media/claude-dark.svg"
+        },
+        "shortTitle": "New Claude Chat"
+      },
+      {
+        "command": "devhub.openMobileApp",
+        "title": "Dev Hub: Open Mobile Web App",
+        "icon": "$(device-mobile)",
+        "shortTitle": "Open Mobile Web App"
+      },
+      {
+        "command": "devhub.rotateMobileToken",
+        "title": "Dev Hub: Sign All Phones Out Of The Mobile Web App",
+        "shortTitle": "Sign Phones Out"
+      },
+      {
+        "command": "devhub.openChat",
+        "title": "Dev Hub: Open Chat",
+        "icon": "$(comment-discussion)",
+        "shortTitle": "Open Chat"
+      },
+      {
+        "command": "devhub.openPort",
+        "title": "Dev Hub: Open Port in Browser",
+        "shortTitle": "Open in Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "devhub.copyPort",
+        "title": "Dev Hub: Copy Port",
+        "shortTitle": "Copy Port",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "devhub.pinPort",
+        "title": "Dev Hub: Pin Port",
+        "shortTitle": "Pin",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "devhub.unpinPort",
+        "title": "Dev Hub: Unpin Port",
+        "shortTitle": "Unpin",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "devhub.killPort",
+        "title": "Dev Hub: Kill Process on Port",
+        "shortTitle": "Kill Process",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "devhub.refreshHistory",
+        "title": "Dev Hub: Refresh History",
+        "icon": "$(refresh)",
+        "shortTitle": "Refresh History"
+      },
+      {
+        "command": "devhub.stopSession",
+        "title": "Dev Hub: Stop Running Session",
+        "icon": "$(debug-stop)",
+        "shortTitle": "Stop Running Session"
+      },
+      {
+        "command": "devhub.revealProject",
+        "title": "Dev Hub: Reveal Project in Finder/Explorer",
+        "icon": "$(folder-opened)",
+        "shortTitle": "Reveal Project in Finder/Explorer"
+      },
+      {
+        "command": "devhub.renameSession",
+        "title": "Dev Hub: Rename Chat",
+        "icon": "$(edit)",
+        "shortTitle": "Rename Chat"
+      },
+      {
+        "command": "devhub.copySessionId",
+        "title": "Dev Hub: Copy Native Session ID",
+        "icon": "$(copy)",
+        "shortTitle": "Copy Native Session ID"
+      },
+      {
+        "command": "devhub.showMoreSessions",
+        "title": "Dev Hub: Show More Sessions",
+        "shortTitle": "Show More Sessions",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "devhub.startAgent",
+        "title": "Dev Hub: Start Agent",
+        "shortTitle": "Start Agent",
+        "icon": "$(play)"
+      },
+      {
+        "command": "devhub.stopAgent",
+        "title": "Dev Hub: Stop Agent",
+        "shortTitle": "Stop Agent",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "devhub.restartAgent",
+        "title": "Dev Hub: Restart Agent",
+        "shortTitle": "Restart Agent",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "devhub.openAgentLogs",
+        "title": "Dev Hub: Open Agent Logs",
+        "shortTitle": "Open Agent Logs",
+        "icon": "$(output)"
+      },
+      {
+        "command": "devhub.revealAgent",
+        "title": "Dev Hub: Reveal Agent Folder",
+        "shortTitle": "Reveal Agent Folder",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "devhub.nextRunning",
+        "title": "Dev Hub: Next Running Session",
+        "shortTitle": "Next Running Session",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "devhub.previousRunning",
+        "title": "Dev Hub: Previous Running Session",
+        "shortTitle": "Previous Running Session",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "devhub.focusView",
+        "title": "Dev Hub: Focus Sidebar",
+        "shortTitle": "Focus Sidebar",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "devhub.showMoreAgentThreads",
+        "title": "Dev Hub: Show More Agent Threads",
+        "shortTitle": "Show More Agent Threads",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "devhub.copyAgentThreadId",
+        "title": "Dev Hub: Copy Agent Thread ID",
+        "shortTitle": "Copy Agent Thread ID",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "devhub.askAgent",
+        "title": "Dev Hub: Ask Task Agent",
+        "shortTitle": "Ask Task Agent",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devhub.openPlannerSession",
+        "title": "Dev Hub: Open Planner Session",
+        "shortTitle": "Open Planner Session",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devhub.plannerApprove",
+        "title": "Dev Hub: Approve Plan",
+        "shortTitle": "Approve Plan",
+        "icon": "$(check)"
+      },
+      {
+        "command": "devhub.plannerReject",
+        "title": "Dev Hub: Reject Plan",
+        "shortTitle": "Reject Plan",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "devhub.plannerDismiss",
+        "title": "Dev Hub: Dismiss Task (done elsewhere)",
+        "shortTitle": "Dismiss Task",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "devhub.plannerRevive",
+        "title": "Dev Hub: Watch Task Again",
+        "shortTitle": "Watch Again",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "devhub.plannerExecute",
+        "title": "Dev Hub: Execute Approved Plan",
+        "shortTitle": "Execute Approved Plan",
+        "icon": "$(play)"
+      },
+      {
+        "command": "devhub.plannerRefreshTask",
+        "title": "Dev Hub: Refresh Task From Tracker",
+        "shortTitle": "Refresh Task From Tracker",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "devhub.plannerStopRun",
+        "title": "Dev Hub: Stop Task Run",
+        "shortTitle": "Stop Task Run",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "devhub.copyJiraKey",
+        "title": "Dev Hub: Copy Task Key",
+        "shortTitle": "Copy Task Key",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "devhub.updateCli",
+        "title": "Dev Hub: Update Claude CLI",
+        "shortTitle": "Update CLI"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devHub",
+          "title": "Dev Hub",
+          "icon": "media/devhub.svg"
+        }
+      ]
+    },
+    "views": {
+      "devHub": [
+        {
+          "id": "devHub.sessions",
+          "name": "Claude Sessions"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "devhub.searchProject",
+          "when": "view == devHub.sessions",
+          "group": "navigation@0"
+        },
+        {
+          "command": "devhub.addWorkspace",
+          "when": "view == devHub.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devhub.addProject",
+          "when": "view == devHub.sessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "devhub.refreshHistory",
+          "when": "view == devHub.sessions",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devhub.newClaudeChat",
+          "when": "view == devHub.sessions && viewItem == devhubProject",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.renameWorkspace",
+          "when": "view == devHub.sessions && viewItem == devhubWorkspace",
+          "group": "devhub@1"
+        },
+        {
+          "command": "devhub.addProject",
+          "when": "view == devHub.sessions && viewItem == devhubWorkspace",
+          "group": "devhub@2"
+        },
+        {
+          "command": "devhub.removeProject",
+          "when": "view == devHub.sessions && viewItem == devhubProject",
+          "group": "devhub@3"
+        },
+        {
+          "command": "devhub.switchClaudeAccount",
+          "when": "view == devHub.sessions && viewItem == devhubProject",
+          "group": "devhub@4"
+        },
+        {
+          "command": "devhub.stopSession",
+          "when": "view == devHub.sessions && viewItem == devhubSessionRunning",
+          "group": "inline@3"
+        },
+        {
+          "command": "devhub.newClaudeChat",
+          "when": "view == devHub.sessions && viewItem == devhubWorkspace",
+          "group": "devhub@1"
+        },
+        {
+          "command": "devhub.revealProject",
+          "when": "view == devHub.sessions && viewItem == devhubProject",
+          "group": "devhub@4"
+        },
+        {
+          "command": "devhub.renameSession",
+          "when": "view == devHub.sessions && (viewItem == devhubSession || viewItem == devhubSessionRunning)",
+          "group": "devhub@3"
+        },
+        {
+          "command": "devhub.copySessionId",
+          "when": "view == devHub.sessions && (viewItem == devhubSession || viewItem == devhubSessionRunning)",
+          "group": "devhub@4"
+        },
+        {
+          "command": "devhub.copyPort",
+          "when": "view == devHub.sessions && viewItem =~ /^devhubPort(Pinned)?$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.openPort",
+          "when": "view == devHub.sessions && viewItem =~ /^devhubPort(Pinned)?$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devhub.pinPort",
+          "when": "view == devHub.sessions && viewItem == devhubPort",
+          "group": "inline@3"
+        },
+        {
+          "command": "devhub.unpinPort",
+          "when": "view == devHub.sessions && viewItem == devhubPortPinned",
+          "group": "inline@3"
+        },
+        {
+          "command": "devhub.killPort",
+          "when": "view == devHub.sessions && viewItem =~ /^devhubPort(Pinned)?$/",
+          "group": "inline@4"
+        },
+        {
+          "command": "devhub.startAgent",
+          "when": "view == devHub.sessions && viewItem == devhubAgentStopped",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.stopAgent",
+          "when": "view == devHub.sessions && viewItem == devhubAgentRunning",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.openAgentLogs",
+          "when": "view == devHub.sessions && viewItem =~ /devhubAgent/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devhub.restartAgent",
+          "when": "view == devHub.sessions && viewItem =~ /devhubAgent/",
+          "group": "devhub@1"
+        },
+        {
+          "command": "devhub.revealAgent",
+          "when": "view == devHub.sessions && viewItem =~ /devhubAgent/",
+          "group": "devhub@2"
+        },
+        {
+          "command": "devhub.plannerApprove",
+          "when": "view == devHub.sessions && viewItem == devhubPlannerTaskWaiting",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.plannerExecute",
+          "when": "view == devHub.sessions && viewItem == devhubPlannerTaskApproved",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.plannerStopRun",
+          "when": "view == devHub.sessions && viewItem == devhubPlannerTaskRunning",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.plannerRefreshTask",
+          "when": "view == devHub.sessions && viewItem =~ /devhubPlannerTask/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devhub.plannerReject",
+          "when": "view == devHub.sessions && viewItem == devhubPlannerTaskWaiting",
+          "group": "devhub@1"
+        },
+        {
+          "command": "devhub.plannerDismiss",
+          "when": "view == devHub.sessions && viewItem =~ /^devhubPlannerTask(Waiting|Approved)?$/",
+          "group": "devhub@2"
+        },
+        {
+          "command": "devhub.plannerRevive",
+          "when": "view == devHub.sessions && viewItem == devhubPlannerTaskDismissed",
+          "group": "inline@1"
+        },
+        {
+          "command": "devhub.copyJiraKey",
+          "when": "view == devHub.sessions && viewItem =~ /devhubPlannerTask/",
+          "group": "devhub@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Dev Hub",
+      "properties": {
+        "devHub.claude.executable": {
+          "scope": "machine",
+          "type": "string",
+          "default": "claude",
+          "description": "Claude Code CLI executable."
+        },
+        "devHub.claude.altAccountFile": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "markdownDescription": "File listing project roots (one absolute path per line, `#` comments) that run on a second Claude account. Dev Hub only edits this file (**Switch Claude Account**); the account is chosen by the wrapper in `devHub.claude.executable`, which must read the same file against `pwd -P`. Empty hides the feature."
+        },
+        "devHub.claude.altAccountName": {
+          "type": "string",
+          "default": "Alt",
+          "description": "Label for the account used by roots in devHub.claude.altAccountFile."
+        },
+        "devHub.claude.defaultAccountName": {
+          "type": "string",
+          "default": "Default",
+          "description": "Label for the account used everywhere else."
+        },
+        "devHub.maxConcurrentTurns": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Maximum concurrently running Dev Hub turns."
+        },
+        "devHub.history.maxFilesPerProvider": {
+          "type": "number",
+          "default": 1500,
+          "minimum": 100,
+          "maximum": 10000,
+          "description": "Bound native history scan per provider."
+        },
+        "devHub.claude.permissionMode": {
+          "scope": "machine",
+          "type": "string",
+          "enum": [
+            "",
+            "acceptEdits",
+            "auto",
+            "plan",
+            "manual",
+            "dontAsk",
+            "bypassPermissions"
+          ],
+          "default": "",
+          "markdownDescription": "Passed to `claude --permission-mode`. **Empty (default) does NOT mean read-only** — Dev Hub inherits your `~/.claude/settings.json`, so if `permissions.allow` lists `Bash`/`Edit`/`Write` (or `defaultMode` is `auto`), Dev Hub will run commands and write files **with no approval prompt** — only tools the CLI would ask about reach the panel's approval card. Set `plan` for read-only analysis, `manual` to have anything not allow-listed ask in the panel instead of running silently. `bypassPermissions` disables all checks — sandbox only."
+        },
+        "devHub.claude.model": {
+          "type": "string",
+          "default": "opus",
+          "markdownDescription": "Default Claude model for new chats. Alias (`opus`, `sonnet`, `haiku`, `fable`) or a full model name. Empty = let the CLI decide."
+        },
+        "devHub.claude.effort": {
+          "type": "string",
+          "default": "medium",
+          "markdownDescription": "Default Claude effort for new chats.",
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "devHub.claude.models": {
+          "type": "array",
+          "default": [
+            "opus",
+            "sonnet",
+            "haiku",
+            "fable"
+          ],
+          "markdownDescription": "Choices offered in the Claude model picker. Edit this instead of waiting for an extension update when new models ship."
+        },
+        "devHub.claude.appendSystemPrompt": {
+          "scope": "machine",
+          "type": "string",
+          "default": "Before starting a group of tool calls, say in one short line what you are about to do. Keep it to one line, skip it for a single trivial call, and do not restate it afterwards.",
+          "markdownDescription": "Extra instructions appended to Claude's system prompt (`--append-system-prompt`). Applies to every Dev Hub turn, including resumes. The default asks for a one-line preamble before each group of tool calls — Claude's reasoning is redacted by the API, so without it a turn is silent between tool rows. On Opus 5.5 that preamble arrives as a `thinking` block with text, which Dev Hub renders as a normal message. Set to empty to leave the system prompt untouched."
+        },
+        "devHub.claude.sessionIdleMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 480,
+          "markdownDescription": "Close an idle Claude session's process after this many minutes. Each live session holds a `claude` process — measured at 120-270 MB of RSS (mean ~200 MB), and a finished turn keeps its process until this timeout, so five recent chats can hold ~1 GB. Lower it if memory is tight. `0` disables the timeout."
+        },
+        "devHub.claude.promptCacheTtl": {
+          "scope": "machine",
+          "type": "string",
+          "enum": [
+            "",
+            "5m",
+            "1h"
+          ],
+          "default": "",
+          "markdownDescription": "Optional Claude prompt-cache TTL. Empty inherits Claude Code's provider/account default; `5m` or `1h` is passed as `CLAUDE_CODE_PROMPT_CACHE_TTL`. This controls vendor prompt caching, not the local process idle timeout."
+        },
+        "devHub.agents": {
+          "scope": "machine",
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Long-running terminal bots shown under **Agents**. Empty by default — add your own, e.g. `[{\"name\":\"my-bot\",\"cwd\":\"~/code/my-bot\"}]`. Each entry needs `name` and `cwd`; `start`/`stop`/`status`/`logs` default to `make <verb>`, and `db` points at the bot's SQLite (otherwise the first `*.db` in `cwd` is used). Status is read by running the `status` command, so it must be side-effect free. Threads are read **read-only**. Set `\"kind\":\"http\"` (with an optional `\"endpoint\"`) for a bot that serves a task API instead: its rows come from `GET /tasks` and each task opens as a chat session."
+        },
+        "devHub.claude.autoCompact": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "Passed to `claude --autocompact`. `auto`, a token budget between `100k` and `1M`, or empty to leave the CLI default."
+        },
+        "devHub.claude.mcp": {
+          "type": "string",
+          "default": "inherit",
+          "enum": [
+            "inherit",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Load the MCP servers the CLI is configured with, like a terminal session does.",
+            "Load no MCP servers at all (passes --strict-mcp-config with no config file)."
+          ],
+          "scope": "machine",
+          "markdownDescription": "Whether a Claude chat gets your MCP servers. Every chat is its own `claude` process and each one starts its **own** copy of every MCP server — a stdio server like `@playwright/mcp` costs two extra Node processes per open chat, so five chats mean ten. Set to `none` when you mostly edit code here and drive MCP from a terminal instead. Read at activation: existing chats keep what they were spawned with, and **Developer: Reload Window** applies the change everywhere."
+        },
+        "devHub.claude.artifacts": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Let a Claude chat publish artifacts — a live page on claude.ai — by spawning the CLI with `CLAUDE_CODE_ARTIFACT=1`. The CLI turns artifacts **off by default** when it detects it is driven over stream-json like Dev Hub drives it, which is why the same CLI publishes from a terminal but not from here. Publishing still goes through the usual permission request. Read at activation: open chats keep what they were spawned with, and **Developer: Reload Window** applies the change everywhere."
+        },
+        "devHub.notify": {
+          "type": "string",
+          "default": "background",
+          "enum": [
+            "off",
+            "background",
+            "always"
+          ],
+          "markdownEnumDescriptions": [
+            "Never notify.",
+            "Only when the finished session is **not** the one on screen — the case you actually miss.",
+            "Every finished turn."
+          ],
+          "markdownDescription": "Notify when a turn finishes or a tool needs approval."
+        },
+        "devHub.agentNames": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "Friendly names for the raw Slack ids an agent thread reports, e.g. `{\"C0123ABCDEF\": \"#team-dev\", \"U0123ABCDEF\": \"alice\"}`. Ids with no entry are shown as-is."
+        },
+        "devHub.mobile.enabled": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Serve the Dev Hub chat as a **real web page** on your local network, for phones where the webview panel stays blank (VS Code Web loads webviews in a cross-origin iframe that WebKit on iPhone will not run). Reach it with **Dev Hub: Open Mobile Web App**, which hands you this machine's LAN URL — open it in Safari on a phone sharing the Wi-Fi and unlock it with `#devHub.mobile.passcode#`, which must be set first. The page can start and steer agents, so treat that URL like a shell: anyone holding it gets the same power the CLIs have on this machine."
+        },
+        "devHub.mobile.passcode": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "pattern": "^(\\d{4}|\\S{8,128})?$",
+          "markdownDescription": "Either **exactly 4 digits** or **8-128 non-space characters**, and the **only** thing guarding the mobile web app — the page asks for it, so the URL itself carries no secret and a bookmark or home-screen app keeps working across restarts. **Required**: with no passcode set, **Dev Hub: Open Mobile Web App** refuses to serve rather than putting an unguarded shell on your Wi-Fi. The two forms get different pages: 4 digits draws a **keypad** that submits by itself, which is the form proven to work in an iOS home-screen web app; a longer passcode draws a **text field plus an Unlock button**, which needs WebKit to focus the field and has not been verified on a real iPhone — if it will not open a keyboard, set 4 digits again and the keypad comes back without reinstalling. Prefer the long form on any machine whose page is reachable from outside the LAN. Wrong codes lock the caller out for 30s, doubling to 15 minutes; behind a reverse proxy or tunnel every caller shares one lockout bucket, so a stranger guessing can also lock **you** out. It travels over plain HTTP like everything else here, so it is protection against the neighbour on your Wi-Fi, not against someone capturing packets. Rotate the sign-ins with **Dev Hub: Sign All Phones Out Of The Mobile Web App**."
+        },
+        "devHub.mobile.port": {
+          "scope": "machine",
+          "type": "number",
+          "default": 39642,
+          "markdownDescription": "Port for the mobile web app, served on the LAN. Fixed by default so the URL survives a **Developer: Reload Window** and a phone's bookmark or home-screen app keeps opening the same page. Change it only on a clash — a second window serving the page fails with `EADDRINUSE` instead of drifting. `0` goes back to picking a free port on each activation, which breaks any saved URL."
+        },
+        "devHub.planner.endpoint": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Loopback API of an `http` agent used for chat turns (`POST /chat` + `GET /stream`). Empty (the default) means no planner daemon: nothing is polled unless an agent in `#devHub.agents#` has `kind: \"http\"`. Per-agent `endpoint` in `#devHub.agents#` overrides it for that agent's task rows. The API has no auth, so it must stay on loopback."
+        },
+        "devHub.mobile.lan": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Serve the mobile web app on the **local network** rather than loopback only. On is what makes a phone able to reach it; off binds `127.0.0.1`, which is useful when you only tunnel to this machine. The page can start and steer agents and its token travels over plain HTTP, so on a network you do not trust, turn this off."
+        },
+        "devHub.cliUpdateCheck": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Check `registry.npmjs.org` (once every 6 hours) whether the installed `claude` CLI is behind the published version, and show a status bar hint when it is. This is the only outbound request Dev Hub makes; turn it off to keep the extension fully offline."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "devhub.searchProject",
+        "key": "cmd+alt+j",
+        "when": "true"
+      },
+      {
+        "command": "devhub.nextRunning",
+        "key": "cmd+shift+]",
+        "when": "true"
+      },
+      {
+        "command": "devhub.previousRunning",
+        "key": "cmd+shift+[",
+        "when": "true"
+      },
+      {
+        "command": "devhub.focusView",
+        "key": "cmd+k cmd+a",
+        "when": "true"
+      }
+    ]
+  },
+  "files": [
+    "dist",
+    "media",
+    "README.md",
+    "LICENSE"
+  ]
+}

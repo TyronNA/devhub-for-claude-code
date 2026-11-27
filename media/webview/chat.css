@@ -1,0 +1,299 @@
+:root{color-scheme:light dark;--accent:#8a8a8a;--accent-soft:rgba(138,138,138,.12);--strong:var(--vscode-editor-foreground)}
+/* `--vscode-foreground` KHÔNG sáng hơn chữ thường — Dark+ còn tối hơn (#CCCCCC so với
+   editor #D4D4D4), 2026-dark thì gần như trùng — nên bold cũ chỉ khác ở weight và nhìn nhạt.
+   Đẩy contrast theo đúng hướng của theme, giữ nguyên hue. VS Code gắn class này lên body;
+   HC-light mang CẢ hai class (back-compat), nên phải loại nó ra khỏi nhánh dark. */
+body.vscode-dark,body.vscode-high-contrast:not(.vscode-high-contrast-light){--strong:color-mix(in srgb,var(--vscode-editor-foreground),#fff 45%)}
+body.vscode-light,body.vscode-high-contrast-light{--strong:color-mix(in srgb,var(--vscode-editor-foreground),#000 45%)}
+/* Claude = terracotta. Đặt trên body để mọi chỗ dùng chung một biến. */
+body[data-provider="claude"]{--accent:#d97757;--accent-soft:rgba(217,119,87,.13)}
+body[data-provider="planner"]{--accent:#8b7cf8;--accent-soft:rgba(139,124,248,.14)}
+/* Planner là daemon HTTP: nó tự chọn model, `POST /chat` không mang model/effort, và nén
+   context là khái niệm của CLI. Ba nút đó trên tab planner là nút chết — ẩn chứ đừng để
+   chúng khoe "auto" rồi mở QuickPick rỗng. */
+body[data-provider="planner"] #model,body[data-provider="planner"] #effort,
+body[data-provider="planner"] #ctxwrap,
+body[data-provider="planner"] .quota{display:none}
+body{padding:0;margin:0;background:var(--vscode-sideBar-background,var(--vscode-editor-background));color:var(--vscode-editor-foreground);font:16px/1.55 var(--vscode-font-family);height:100vh;display:flex;flex-direction:column;-webkit-text-size-adjust:100%}
+/* Trên iOS `100vh` tính cả phần bị thanh địa chỉ che nên composer bị đẩy khỏi màn hình.
+   Qua @supports chứ không phải `height:var(--vh,100dvh)`: engine không hiểu `dvh` sẽ coi
+   declaration đó là invalid rồi rơi về `auto`, KHÔNG rơi lại `100vh`. Bàn phím mở thì JS
+   ghi inline height (visualViewport) — inline thắng cả hai. */
+@supports (height:100dvh){body{height:100dvh}}
+header{background:var(--vscode-sideBar-background,var(--vscode-editor-background));padding:7px 12px;border-bottom:1px solid var(--vscode-panel-border);display:flex;justify-content:space-between;align-items:center;gap:8px}
+header .left,header .right{display:flex;align-items:center;gap:6px;min-width:0}
+.chip{border:1px solid transparent;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border-radius:999px;padding:2px 10px;font:inherit;font-size:15px;cursor:pointer;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s}
+.chip:hover{background:var(--vscode-button-secondaryHoverBackground)}
+.chip.ghost{background:transparent;color:var(--vscode-descriptionForeground);border-color:var(--vscode-panel-border)}
+.chip.ghost:hover{background:var(--accent-soft);color:var(--vscode-foreground)}
+#provider{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);font-weight:600;display:inline-flex;align-items:center;gap:5px}
+#provider.iconly{padding:4px 8px}
+/* Chip chỉ có một emoji: bớt padding cho khỏi to hơn chip chữ bên cạnh. */
+#history{padding:2px 8px;font-size:13px}
+/* Chip git. `#branch` là span chứ không phải button: nó chỉ để đọc, mọi thứ bấm được
+   trong header đều mở một QuickPick, và một nút không làm gì là lời hứa suông. */
+#branch,#scm{display:inline-flex;align-items:center;gap:5px;font-size:14px;padding:2px 9px}
+/* `display` của tác giả thắng UA stylesheet, nên `hidden` phải được nói lại ở đây. */
+#branch[hidden],#scm[hidden]{display:none}
+#scm .scmadd{color:var(--vscode-gitDecoration-addedResourceForeground,#3fb950)}
+#scm .scmdel{color:var(--vscode-gitDecoration-deletedResourceForeground,#f85149)}
+#scm .scmfiles{color:var(--vscode-foreground);font-weight:600}
+.scmbar{display:inline-flex;gap:2px;align-items:center}
+.scmbar .sq{width:7px;height:7px;border-radius:1px;background:var(--vscode-panel-border)}
+.scmbar .sq.add{background:var(--vscode-gitDecoration-addedResourceForeground,#3fb950)}
+.scmbar .sq.del{background:var(--vscode-gitDecoration-deletedResourceForeground,#f85149)}
+.mark{flex:none;vertical-align:-1px}
+#status{font-size:14px;padding:1px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}
+main{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:6px}
+button.older{display:block;margin:4px auto 12px}
+.empty{color:var(--vscode-descriptionForeground);text-align:center;margin-top:32px}
+.msg{max-width:100%;border-radius:7px;padding:6px 9px;word-break:break-word}
+.msg .meta{font-size:13px;text-transform:uppercase;letter-spacing:.5px;opacity:.55;margin-bottom:2px}
+/* Mọi khối phải bắt đầu ở CÙNG một mốc: main 12px + 11px = 23px, khớp với
+   tool/command (viền 2px + 9px) và .perm (viền 1px + 10px). .user có viền 1px nên
+   chỉ cần 10px, .assistant không có viền nên cần đủ 11px — trước đây nó là 0 và
+   chữ của agent thụt sang trái 11px so với mọi thứ khác. */
+/* User phải tách khỏi nền code cả khi mắt không phân biệt được màu: nền có chênh sáng,
+   còn vạch trái dày là dấu hiệu hình học cố định, không phụ thuộc hue của provider. */
+.user{align-self:stretch;background:var(--vscode-input-background);background:color-mix(in srgb,var(--vscode-input-background) 78%,var(--vscode-editor-foreground) 22%);border:1px solid var(--vscode-panel-border);border-color:var(--vscode-contrastActiveBorder,var(--accent));border-radius:7px;padding-left:10px;box-shadow:inset 3px 0 0 var(--vscode-contrastActiveBorder,var(--accent))}
+.assistant{align-self:flex-start;background:transparent;padding-left:11px}
+.uimgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+/* Ảnh đính kèm bị dọn sau TTL — alt là tên file, để bản ghi cũ vẫn nói được đã gửi ảnh gì. */
+.uimg{max-width:180px;max-height:140px;border-radius:6px;background:var(--vscode-textCodeBlock-background);object-fit:contain}
+.assistant-image{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;border-radius:8px;background:var(--vscode-textCodeBlock-background);object-fit:contain}
+/* Tool/command là log, không phải hội thoại: viền mảnh, nền phẳng, chữ nhỏ hơn. */
+.tool,.command{align-self:stretch;background:transparent;border-left:2px solid var(--vscode-panel-border);border-radius:0;padding:2px 0 2px 9px}
+details>summary{display:flex;align-items:flex-start;gap:8px}
+details>summary::-webkit-details-marker{display:none}
+details[open]>summary .peek{display:none}
+details[open]>summary::before{content:"▾"}
+details>summary::before{content:"▸";color:var(--accent);flex:none;line-height:1.6}
+.morecount{flex:none;color:var(--vscode-descriptionForeground);font-size:13.5px;align-self:center}
+pre.peek{opacity:.9;flex:1;min-width:0}
+pre.full{margin-top:2px}
+.assistant>pre.mono,.stream-done>pre.mono,.stream-tail>pre.mono,.md-quote>pre.mono{margin:.6em 0}
+/* markdown() sinh hai class này nhưng chưa bao giờ có rule: blockquote rơi về mặc định
+   trình duyệt (thụt 40px, không dấu hiệu gì), hr về viền 3D. */
+.md-quote{margin:.6em 0;padding-left:10px;border-left:2px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground)}
+.md-hr{margin:.9em 0;border:0;border-top:1px solid var(--vscode-panel-border)}
+.tool .meta,.command .meta{margin-bottom:1px}
+.command{border-left-color:var(--accent)}
+.file{align-self:flex-start;border-left:2px solid var(--vscode-charts-green,#89d185);padding-left:9px;border-radius:0}
+.warning{align-self:stretch;border-left:2px solid var(--vscode-editorWarning-foreground);border-radius:0;padding-left:9px}
+.error{align-self:stretch;border-left:2px solid var(--vscode-editorError-foreground);border-radius:0;padding-left:9px}
+.trow{display:flex;gap:6px;align-items:baseline;min-width:0}
+/* Lệnh dài nằm trong <details>; căn cho dòng có mũi tên và dòng không có thẳng hàng nhau. */
+details>summary>.trow{flex:1}
+.tool>.trow,.command>.trow{padding-left:17px}
+.morecount.bad{color:var(--vscode-editorError-foreground)}
+/* `flex:none` giữ base size = max-content, nên `word-break` của `.msg` không bao giờ được
+   dùng: một tên tool MCP (`mcp__plugin_playwright_playwright__browser_resize`) rộng 413px
+   đẩy scrollWidth của `main` lên 449 ở màn 390 — cả khung chat lệch ngang. Kẹp bằng
+   `max-width` chứ ĐỪNG cho co: `flex` co thì tham số (110 ký tự) luôn tạo thiếu chỗ và tên
+   ngắn cũng bị ngắt giữa chữ ("Bas/h"). */
+.tname{color:var(--accent);font-weight:600;flex:none;max-width:100%}
+.targ,.tout{font-family:var(--vscode-editor-font-family,monospace);font-size:14.5px;color:var(--vscode-descriptionForeground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.tout{flex:1}
+/* Nhịp dọc: khoảng cách giữa các khối phải LỚN hơn khoảng cách giữa các dòng trong một
+   khối, nếu không mắt không thấy đoạn nào kết thúc. line-height ở đây là 1.55, nên gap
+   3px cũ (~12% một dòng) làm cả tin nhắn dính thành một mảng chữ. .6em ~ 10px. */
+.md-p{margin:.6em 0}
+/* Lề ngoài cùng do padding của .msg lo; khối đầu/cuối không được cộng thêm. Lúc stream,
+   khối đầu tiên nhìn thấy nằm trong .stream-tail khi .stream-done còn rỗng. */
+.assistant>:first-child,.assistant>.stream-done>:first-child,
+.assistant>.stream-done:empty+.stream-tail>:first-child{margin-top:0}
+.assistant>:last-child,.assistant>.stream-tail>:last-child{margin-bottom:0}
+.md-h1,.md-h2,.md-h3,.md-h4{font-weight:700;margin:1.1em 0 .25em;color:var(--vscode-editor-foreground);color:var(--strong)}
+.md-h1{font-size:18px}.md-h2{font-size:17px}.md-h3,.md-h4{font-size:16px}
+.md-table{border-collapse:collapse;margin:.6em 0;font-size:14.5px;display:block;overflow-x:auto;max-width:100%}
+.md-table th,.md-table td{border:1px solid var(--vscode-panel-border);padding:3px 9px;text-align:left;vertical-align:top}
+.md-table th{font-weight:600;background:var(--vscode-textCodeBlock-background)}
+/* 2em = đúng mức thụt của extension Claude (`.root_ ol,ul{padding-inline-start:2em}`).
+   20px cũ hẹp hơn một ký tự bullet nên cấp lồng nhau gần như không nhìn ra. */
+.md-list{margin:.6em 0;padding-inline-start:2em}
+.md-list li{margin:.15em 0}
+.md-list .md-list{margin:.15em 0}
+.msg code{font-family:var(--vscode-editor-font-family,monospace);font-size:14.5px;background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px}
+.msg strong{font-weight:700;color:var(--vscode-editor-foreground);color:var(--strong)}
+.msg a{color:var(--vscode-textLink-foreground);text-decoration:underline;cursor:pointer}
+pre{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit}
+pre.mono{font-family:var(--vscode-editor-font-family,monospace);font-size:14.5px;line-height:1.45;background:var(--vscode-textCodeBlock-background);padding:4px 7px;border-radius:4px;overflow-x:auto;margin:1px 0}
+.command>pre.mono:first-of-type{background:transparent;padding:0;color:var(--accent)}
+details summary{cursor:pointer;color:var(--vscode-descriptionForeground);font-size:14px;margin:1px 0;list-style:none}
+details summary:hover .morecount{color:var(--accent)}
+button.path{background:none;border:none;color:var(--vscode-textLink-foreground);cursor:pointer;font:inherit;padding:0;text-decoration:underline}
+footer{border-top:1px solid var(--vscode-panel-border);padding:8px 12px 10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+/* Một khung duy nhất bọc attachment + ô nhập + toolbar, viền sáng lên khi focus. */
+.composer-box{border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:10px;background:var(--vscode-input-background);padding:6px 8px 6px;transition:border-color .12s}
+.composer-box:focus-within{border-color:var(--accent)}
+#attachments{display:flex;flex-wrap:wrap;gap:5px;margin:2px 2px 6px}
+#attachments .att{display:inline-flex;align-items:center;gap:5px;font-size:13.5px;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:2px 5px 2px 3px}
+#attachments .thumb{width:28px;height:28px;object-fit:cover;border-radius:4px;display:block}
+#attachments .attdim{color:var(--vscode-descriptionForeground);opacity:.8}
+#attachments .attx{background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:0 2px;opacity:.7}
+#attachments .attx:hover{opacity:1}
+#attachments .att.open{cursor:pointer}
+#attachments .att.open:hover{background:var(--accent-soft)}
+textarea{display:block;width:100%;box-sizing:border-box;resize:none;min-height:46px;max-height:40vh;background:transparent;color:var(--vscode-input-foreground);border:none;padding:2px 2px 4px;font:inherit;line-height:1.5;outline:none}
+.composerbar{display:flex;align-items:center;gap:5px;margin-top:2px}
+#model,#effort{color:var(--accent);font-weight:600;border-color:var(--accent-soft)}
+#model:hover,#effort:hover{color:var(--accent)}
+/* Vòng quota: cung, chữ và màu đều là % CÒN LẠI — cùng chiều với vòng context. */
+.quota{display:flex;align-items:center;gap:4px;color:var(--vscode-descriptionForeground);font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap;cursor:default}
+.quota[hidden]{display:none}
+/* Card neo vào .composerbar (không phải vòng) và canh phải: vòng 5h nằm giữa hàng, neo vào nó thì
+   panel hẹp đẩy card lọt ra mép trái. Hiện gần như ngay (60ms chỉ để lướt chuột qua không nháy). */
+.composerbar{position:relative}
+.qtip{position:absolute;right:0;bottom:calc(100% + 10px);z-index:20;width:260px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:10px 12px 11px;
+  background:var(--vscode-editorHoverWidget-background,var(--vscode-editor-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));
+  border:1px solid var(--vscode-editorHoverWidget-border,var(--vscode-panel-border));border-radius:10px;box-shadow:0 6px 20px var(--vscode-widget-shadow,rgba(0,0,0,.3));
+  font-size:12.5px;white-space:normal;pointer-events:none;opacity:0;visibility:hidden;transform:translateY(4px);
+  transition:opacity .1s,transform .1s,visibility 0s linear .1s}
+.quota:hover .qtip,.quota.open .qtip,#ctxwrap:hover .qtip{opacity:1;visibility:visible;transform:none;transition:opacity .1s .06s,transform .1s .06s,visibility 0s .06s}
+.qt-head{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--vscode-descriptionForeground);margin-bottom:4px}
+.qt-big{display:flex;align-items:baseline;gap:5px}
+.qt-left{font-size:22px;font-weight:600;line-height:1.1}
+.qt-unit{color:var(--vscode-descriptionForeground)}
+.qt-used{margin-left:auto;color:var(--vscode-descriptionForeground)}
+.qt-bar{height:5px;border-radius:3px;background:var(--vscode-panel-border);overflow:hidden;margin:7px 0 8px}
+.qt-fill{height:100%;border-radius:3px}
+.qt-row{display:flex;align-items:baseline;gap:6px;color:var(--vscode-descriptionForeground)}
+.qt-row b{color:var(--vscode-foreground);font-weight:600}
+.qt-when{margin-left:auto}
+.qtip .qt-row+.qt-row{margin-top:3px}
+.qt-foot{margin-top:8px;padding-top:7px;border-top:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);font-size:11.5px}
+.qtip{text-align:left;cursor:default}
+/* Chạm vòng context là compact luôn; iOS giữ :hover sau cú chạm nên card sẽ treo lại — ẩn trên cảm ứng. */
+@media (hover:none){#ctxwrap .qtip{display:none}}
+/* Chip cache nằm bên trái hàng: card canh theo mép trái composer thay vì mép phải. */
+#cachewrap .qtip{right:auto;left:0}
+.qt-sec{margin-top:9px;padding-top:8px;border-top:1px solid var(--vscode-panel-border)}
+.qt-sec .qt-foot{border-top:none;padding-top:0;margin-top:6px}
+.qt-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qt-stale{margin-top:6px;color:var(--vscode-editorWarning-foreground)}
+.composerbar .spacer{flex:1}
+#ctxwrap{display:flex;align-items:center;gap:5px;color:var(--vscode-descriptionForeground);font-size:13.5px;font-variant-numeric:tabular-nums;
+  background:none;border:1px solid transparent;border-radius:999px;padding:2px 8px 2px 2px;font-family:inherit;cursor:pointer}
+#ctxwrap:hover{border-color:var(--accent);color:var(--vscode-foreground)}
+button#send{width:26px;height:26px;flex:none;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:17px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+button#send:disabled{opacity:.35;cursor:default}
+/* Dòng "đang nghĩ": logo hãng xoay + động từ đổi + đồng hồ. Ngừng xoay = đã dừng. */
+.perm{align-self:stretch;border:1px solid var(--accent);border-radius:8px;padding:8px 10px;background:var(--accent-soft)}
+.perm .ptitle{font-weight:600;color:var(--accent);margin-bottom:4px}
+.perm pre{font-family:var(--vscode-editor-font-family,monospace);font-size:14.5px;background:var(--vscode-textCodeBlock-background);padding:5px 7px;border-radius:4px;margin:4px 0}
+.qbox{margin:6px 0}
+.qtext{margin-bottom:5px}
+.qopts{display:flex;flex-wrap:wrap;gap:6px}
+.qopt{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;max-width:320px;
+  background:var(--vscode-input-background);border:1px solid var(--vscode-panel-border)!important;
+  color:var(--vscode-foreground);border-radius:7px;padding:6px 10px!important;cursor:pointer}
+.qopt:hover{border-color:var(--accent)!important}
+.qopt.sel{border-color:var(--accent)!important;background:var(--accent-soft)}
+.qlabel{font-weight:600}
+.qdesc{font-size:13px;color:var(--vscode-descriptionForeground);white-space:normal}
+.perm .pacts{display:flex;gap:6px;margin-top:6px}
+.perm button{border:none;border-radius:6px;padding:4px 14px;font:inherit;font-size:15px;cursor:pointer}
+.perm .allow{background:var(--accent);color:#fff;font-weight:600}
+.perm .deny{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+.perm.answered{opacity:.55}
+.perm.answered .pacts{display:none}
+/* .pacts biến mất nhưng nút chọn của AskUserQuestion thì không — chặn bấm lần hai. */
+.perm.answered .qopt{pointer-events:none}
+.perm .phint{color:var(--vscode-descriptionForeground);font-size:13.5px;margin:2px 0}
+#thinking{display:flex;align-items:center;gap:8px;padding:0 4px 8px;font-size:15px;color:var(--accent)}
+#thinking[hidden]{display:none}
+#spinner{width:13px;height:13px;flex:none;display:inline-flex;animation:spin 1.5s linear infinite}
+#spinner svg{width:13px;height:13px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#thinkword{font-weight:600;flex:none}
+#thinktime{color:var(--vscode-descriptionForeground);font-variant-numeric:tabular-nums;flex:none}
+/* Xong lượt: cùng thanh đó đổi vai thành footer tổng kết — hết xoay, hết màu accent. */
+#thinking.done{color:var(--vscode-descriptionForeground)}
+#thinking.done #spinner{animation:none;opacity:.65}
+/* Dòng tổng kết dài hơn bề ngang điện thoại thì cắt, đừng đẩy nút Stop ra ngoài. */
+#thinktokens{color:var(--vscode-descriptionForeground);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#thinking button{margin-left:auto;background:transparent;border:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);border-radius:999px;padding:1px 10px;font:inherit;font-size:14px;cursor:pointer}
+#thinking button:hover{border-color:var(--accent);color:var(--accent)}
+@media (prefers-reduced-motion:reduce){#spinner{animation:none}}
+
+/* Hàng chờ: tin đã gõ nhưng lượt hiện tại chưa xong. Host là nguồn sự thật. */
+#queue{display:flex;flex-direction:column;gap:3px}
+#queue:not(:empty){padding:4px 0 2px}
+.qitem{display:flex;align-items:flex-start;gap:6px;font-size:12px;line-height:1.35;
+  color:var(--vscode-descriptionForeground);border-left:2px solid var(--vscode-panel-border);padding-left:7px}
+.qitem .qtext{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qitem .qn{opacity:.6;font-variant-numeric:tabular-nums}
+.qitem button{background:none;border:0;color:inherit;cursor:pointer;padding:0 2px;opacity:.6;font-size:13px}
+.qitem button:hover{opacity:1;color:var(--vscode-errorForeground)}
+
+/* ---------- Cảm ứng / bề ngang hẹp (vscode.dev trên điện thoại) ---------- */
+/* Hai trục khác nhau: cỡ nút theo LOẠI con trỏ, còn layout theo BỀ RỘNG panel (media query
+   trong webview đo iframe, nên một pane hẹp trên desktop cũng vào nhánh dưới — đúng ý). */
+/* Dán ảnh là đường chính trên desktop; nút chọn file chỉ mọc ra khi không có con trỏ thật
+   (iOS không phát `paste` kèm file), để composerbar trên desktop không thêm nút. */
+#attach{display:none}
+@media (hover:none){
+  #attach{display:inline-block}
+  /* Không có con trỏ thật thì :hover dính lại sau khi bấm — trả về trạng thái thường. */
+  .chip:hover{background:var(--vscode-button-secondaryBackground)}
+  .chip.ghost:hover{background:transparent;color:var(--vscode-descriptionForeground)}
+  #ctxwrap:hover{border-color:transparent;color:var(--vscode-descriptionForeground)}
+  #attachments .attx:hover{opacity:.7}
+  #attachments .att.open:hover{background:transparent}
+  /* `!important` vì rule gốc cũng dùng — nó ở đó để thắng style button VS Code chèn vào. */
+  .qopt:hover{border-color:var(--vscode-panel-border)!important}
+  button,.chip,.att,summary{-webkit-tap-highlight-color:transparent}
+  /* Ngón tay cần ~44px; 22px của chip là cỡ dành cho chuột. */
+  .chip{padding:7px 12px}
+  button#send{width:38px;height:38px}
+  #ctxwrap{padding:7px 10px 7px 4px}
+  .qopt{padding:9px 12px!important}
+  #attachments .attx{padding:4px 8px}
+}
+@media (max-width:560px){
+  header{padding:6px 8px;gap:6px}
+  /* Header là MỘT hàng không wrap và mọi chip đều co được: ở 390px hàng này chỉ dư 3px,
+     nên thiếu một pixel là cả sáu chip cùng bị ellipsis — kể cả chip một ký tự ("‹.."),
+     tức mất luôn cái nhìn ra nó là nút gì. Crumb là chỗ DUY NHẤT được co. */
+  header .left{flex:1 1 auto}
+  header .right{flex:none}
+  header .chip{flex:none}
+  #crumb{flex:1 1 auto;min-width:0;max-width:none}
+  /* Ở 390px hàng header chỉ dư 3px (xem ghi chú trên): không có chỗ cho chip git, và co
+     nó lại thì chip khác bị ellipsis. Ẩn hẳn — số liệu git là thứ bỏ được, nút thì không. */
+  #branch,#scm{display:none}
+  /* Selector id nên nó không nhận padding cảm ứng của `.chip` — chip đồng hồ cao 26px giữa
+     hàng 36px, và vùng chạm hụt gần một nửa. */
+  #history{padding:6px 9px;font-size:14px}
+  main{padding:8px;gap:8px}
+  /* MỘT hàng ở 390px: chỉ vừa nếu tên model được co và effort rút còn 3 ký tự (chat.js).
+     `min-width:0` là điều kiện bắt buộc — flex item mặc định `min-width:auto` nên chip
+     `gpt-5.6-luna` sẽ đẩy cả hàng rộng hơn khung thay vì tự cắt. Mọi chip khác giữ nguyên
+     bề rộng: co chúng là mất luôn dấu hiệu nút đó là gì. Số token vẫn nằm trong tooltip. */
+  .composerbar{gap:4px}
+  /* `.chip` có `overflow:hidden` nên `min-width:auto` của flex item rơi về 0 — không chốt
+     `flex:none` thì cả hàng cùng bị bóp, kể cả chip một ký tự. */
+  .composerbar>*{flex:none}
+  .composerbar .spacer{flex:1 1 auto}
+  #model{flex:0 1 auto;min-width:0}
+  #model,#effort{font-size:13px;padding:5px 8px}
+  /* Trên điện thoại % context là số ít giá trị nhất trong ba vòng — bỏ nó (vòng vẫn còn,
+     nó là nút compact) để lấy chỗ cho % của hai vòng limit, thứ không có chỗ nào khác báo. */
+  #q5lab,#q7lab,#ctxtext,#ctxtokens{display:none}
+  #cachelab{display:none}
+  .chip{padding:6px 9px;font-size:14px}
+  /* Cụm ba vòng là thứ chật nhất ở 390px: khoảng hở và cỡ số nhỏ hơn hàng chip, vì % chỉ
+     cần đọc được chứ không phải bấm được. */
+  .quota{gap:2px;font-size:12.5px}
+  #ctxwrap{padding:5px 2px}
+  /* Chỉ `min-height` — ĐỪNG đặt `height` ở đây. 0.29.18 đặt `height:34px` để ô rỗng khỏi cao
+     ba dòng, nhưng `grow()` tính ra 73px (nó đo `rows="3"`) nên mỗi event visualViewport lại
+     nới ô lên 73px; giữa lúc iOS trồi bàn phím thì đúng một lần relayout đó đủ để WebKit hủy
+     present. Giờ `grow()` đo nội dung và chạy sẵn lúc boot, nên min-height là cỡ nghỉ. */
+  textarea{min-height:32px;line-height:1.4}
+  .composer-box{padding:5px 7px}
+  footer{padding-top:6px}
+  .md-list{padding-inline-start:1.4em}
+  .qopt{max-width:100%}
+  footer{padding-left:8px;padding-right:8px}
+}
