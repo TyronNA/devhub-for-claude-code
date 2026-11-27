@@ -159,6 +159,7 @@ export class SessionManager {
     await this.outOfTurnWrites;
   }
   async cancelAll(){for(const [,a] of [...this.active]){try{await this.cancel(a.session.provider,a.session.nativeSessionId);}catch{}}}
-  async waitForIdle(){await Promise.allSettled([...this.tasks]);}
+  /** Also drains the out-of-turn status writes: deactivate must not drop them, and tests must not guess how long they take. */
+  async waitForIdle(){await Promise.allSettled([...this.tasks]);await this.outOfTurnWrites;}
   runningCount(){return this.active.size;}
 }

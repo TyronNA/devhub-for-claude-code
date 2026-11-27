@@ -76,12 +76,12 @@ test('an unplanned turn flips status and blocks overlapping turns, then releases
   const seen:any[]=[];manager.on('event',(x:any)=>seen.push(x.event.type));
   manager.ingestOutOfTurn('claude','n1',{type:'tool_completed',tool:'Bash',label:'sleep',callId:TOOL,timestamp:1} as any);
   assert.equal(manager.isBusy('claude','n1'),true,'must be busy, otherwise a user turn overlaps it');
-  await new Promise(r=>setTimeout(r,20));
+  await manager.waitForIdle();
   assert.equal((await store.list())[0].status,'running');
   manager.ingestOutOfTurn('claude','n1',{type:'assistant_message',text:'all done',timestamp:2} as any);
   manager.ingestOutOfTurn('claude','n1',{type:'turn_done',timestamp:3} as any);
   assert.equal(manager.isBusy('claude','n1'),false);
-  await new Promise(r=>setTimeout(r,20));
+  await manager.waitForIdle();
   assert.equal((await store.list())[0].status,'done','done again so the queue can flush');
   assert.deepEqual(seen,['tool_completed','assistant_message','turn_done']);
 });
