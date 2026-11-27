@@ -6,110 +6,26 @@
 [![Release](https://img.shields.io/github/v/release/TyronNA/devhub-for-claude-code)](https://github.com/TyronNA/devhub-for-claude-code/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-hero-dark.png">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-hero-light.png" alt="Without Dev Hub: one VS Code window per repo, about 1 GB each. With Dev Hub: one window starts the claude CLI in each repo, and the chat opens in a tab and on your phone.">
+</picture>
+
 <p align="center"><img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/vscode.png" width="720" alt="Dev Hub in VS Code: projects grouped by workspace in the sidebar, a Claude Code chat open on the right"></p>
 
 > Unofficial and community-built. Not affiliated with or endorsed by Anthropic. "Claude" and
-> "Claude Code" are trademarks of Anthropic. Dev Hub drives the `claude` CLI you already have
-> installed and logged in. It has no account or API key of its own.
+> "Claude Code" are trademarks of Anthropic. Dev Hub drives the `claude` CLI on your machine with
+> your own login. It has no account or API key of its own.
 
-## Why
+## Get started
 
-One VS Code window per project costs about **1 GB of RAM each**
-([measured](docs/PERFORMANCE.md#one-window-per-workspace)). Dev Hub keeps 30+ projects reachable
-from **one** window. You register repos by path, so VS Code never indexes them or watches their
-files. Each chat starts the CLI with the repo as its working directory, so your `CLAUDE.md`, skills
-and memory work exactly as they do in a terminal.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-start-dark.png">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-start-light.png" alt="Four steps: download the vsix, install it from the Extensions view, click the top row of the Dev Hub sidebar until it is gone (install Claude Code, log in, add a project), then start a chat.">
+</picture>
 
-## Features
-
-### Every project, one window
-- **Workspaces → projects → chats in one sidebar**, separate from the VS Code workspace. Nothing
-  gets indexed or file-watched, so 30 repos cost the same as one.
-- **Switch in a keystroke** (macOS keys; `Cmd` is the Super key on Linux). `Cmd+Alt+J` finds any
-  project and starts a chat in it. `Cmd+Shift+]` / `Cmd+Shift+[` jump between the sessions that
-  are running right now.
-- **Recent** lists the 8 newest chats across every workspace, running ones first, along with the
-  total memory of the live CLI processes.
-- **One tab per chat.** Tabs survive **Reload Window**, and the header shows the branch with
-  `↑ahead ↓behind`.
-- Chats you started in a terminal are picked up from `~/.claude` and can be resumed here.
-
-### A chat that shows what the agent made
-- **Images and video render inline.** When the agent names a PNG, JPEG, GIF, WebP, MP4, MOV or
-  WebM by path (a Playwright screenshot, a recorded demo, a generated GIF), it plays right in the
-  reply. Audio plays when the agent hands it over as a video file. This works on the phone too.
-- **Paste screenshots** into the prompt.
-- **Readable tool runs.** Each tool call is one line and long output folds behind `+N lines`.
-  Sub-agents are labelled by their task, and background commands report back after the turn
-  ends.
-- **Questions become buttons.** When Claude asks you to choose, you tap an answer instead of
-  typing it.
-
-### Nothing hangs, nothing gets lost
-- **Queue while it works.** Prompts you send during a turn wait their turn. **Stop** ends the
-  turn and keeps the queue.
-- **Every approval gets an answer.** Allow / Deny cards appear in the panel, and a timeout or a
-  closed tab sends a deny, so the CLI never blocks.
-- **Notifications** when a turn finishes or needs approval while you are looking at something
-  else.
-
-### Limits at a glance
-- **Rings show what is left**: context window, 5-hour and 7-day quota. Click the context ring to
-  compact.
-- A **prompt-cache chip** shows whether the next turn is cheap (`cache 50m`) or `cold`.
-- Model and thinking effort are set per chat and remembered.
-
-### On your phone
-- **The same chats on a phone web page** over your local network: streaming replies, approval
-  cards, history, images and video. Add it to the home screen like an app. No app store and no
-  cloud relay.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-chat.png" width="220" alt="Phone web app: the same chat with an approval card">
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-history.png" width="220" alt="Phone web app: history drawer across projects">
-</p>
-
-### Extras
-- **Ports panel**: which project owns each listening port, with actions to open, pin or kill it.
-- **Artifacts**: a chat can publish a live page on claude.ai.
-- **Second Claude account per project** through a small wrapper script
-  ([details](docs/DESIGN.md#settings)).
-- A status bar hint when your `claude` CLI is out of date.
-
-## Requirements
-
-- VS Code **1.95** or newer.
-- A Claude **Pro, Max, Team or Enterprise** plan, or an Anthropic Console account. The free
-  claude.ai plan does not include Claude Code.
-- macOS or Linux. Windows has not been tested; the ports panel uses `lsof`.
-- The [Claude Code](https://code.claude.com/docs/en/setup) CLI. You don't need to install it first:
-  Dev Hub walks you through it.
-
-## Install
-
-1. Download the latest `dev-hub-claude-codex-*.vsix` from
-   [Releases](https://github.com/TyronNA/devhub-for-claude-code/releases).
-2. In VS Code open the Extensions view, click **…** at its top right, choose
-   **Install from VSIX…** and pick the file. From a terminal this is
-   `code --install-extension dev-hub-claude-codex-*.vsix`.
-3. Click the **Dev Hub** icon in the activity bar on the left.
-
-## First run
-
-The top row of the Dev Hub sidebar always shows the next thing to do. Click it, and it disappears
-once everything works.
-
-<img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/first-run.png" width="720" alt="The Install Claude Code row and the installer picker">
-
-| Row | What happens when you click it |
-|---|---|
-| ⚠️ **Install Claude Code…** | Pick an installer (the official one is first). Dev Hub opens a terminal with the command already typed. Read it, press **Enter**, and Dev Hub notices when it finishes. If it asks you to, click **Reload Window**. |
-| ⚠️ **Log in to Claude Code…** | Your browser opens the Claude sign-in page. Sign in and come back. The row goes away by itself. |
-| ➕ **Add your first project…** | Pick any folder with code in it. It is not added to your VS Code workspace. |
-
-After that, click **New chat…** at the bottom of the sidebar and type what you want done. The same
-steps are always available as **Dev Hub: Get Started** in the command palette (`⇧⌘P` / `Ctrl+Shift+P`).
+**[Download the .vsix](https://github.com/TyronNA/devhub-for-claude-code/releases)** · needs VS Code 1.95+, macOS or Linux, and a
+Claude Pro / Max / Team / Enterprise plan (the free plan has no Claude Code).
 
 <details>
 <summary>Prefer to set up Claude Code by hand?</summary>
@@ -123,27 +39,32 @@ claude --version                                 # prints a version when it work
 If you installed it somewhere unusual, put its full path in the `devHub.claude.executable` setting.
 </details>
 
-## Quick start
+## How it works
 
-1. **Dev Hub: Add Workspace**, then give it a name such as `Work`. Workspaces are only folders
-   in the sidebar, so one is enough to start.
-2. **Dev Hub: Add Project**, then pick a repo folder. The repo is stored as a path only.
-3. Click **New Claude Chat** on the project row and type a prompt.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-flow-dark.png">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-flow-light.png" alt="You type in the panel or on the phone. Dev Hub queues the prompt if a turn is running, then starts the claude CLI in the project folder, so your CLAUDE.md, skills and memory apply. The reply streams back with images and video inline. Approval requests become Allow or Deny cards, and anything unanswered is denied so the CLI never hangs.">
+</picture>
 
-**Dev Hub: Search Project & Start Chat** jumps straight to a chat in any registered project.
+## What you get
 
-### Use it from your phone
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-features-dark.png">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-features-light.png" alt="Features: one sidebar for every project with keyboard switching; images and video inline; a prompt queue and tabs that survive reloads; context and quota rings; the phone web app; a ports panel, terminal chats picked up from ~/.claude, and a second Claude account per project.">
+</picture>
 
-1. Set a passcode in `devHub.mobile.passcode`: exactly 4 digits, or 8–128 characters.
-2. Run **Dev Hub: Open Mobile Web App** and agree to the prompt. It shows a URL such as
-   `http://192.168.1.20:39642/`.
-3. Open that URL on a phone on the same Wi-Fi, enter the passcode, and optionally *Add to Home
-   Screen*.
+## On your phone
 
-> ⚠️ The passcode is the **only** thing guarding the page, and anyone who gets past it can
-> drive an agent on your machine. Use a long passcode, and set `devHub.mobile.lan: false` with a
-> tunnel you trust (for example Tailscale) on networks you don't control.
-> **Dev Hub: Sign All Phones Out Of The Mobile Web App** revokes every phone that is signed in.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-phone-dark.png">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/card-phone-light.png" alt="Three steps: set devHub.mobile.passcode, run Dev Hub: Open Mobile Web App, open the URL it shows on a phone on the same Wi-Fi. The passcode is the only guard; on networks you do not control, set devHub.mobile.lan to false and use a tunnel you trust.">
+</picture>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-chat.png" width="220" alt="Phone web app: the same chat with an approval card">
+  &nbsp;&nbsp;
+  <img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/mobile-history.png" width="220" alt="Phone web app: history drawer across projects">
+</p>
 
 ## Permissions: read this
 
