@@ -101,7 +101,7 @@ npm run package     # → dev-hub-claude-codex-<version>.vsix
 `node scripts/demo.js` serves the chat panel and the phone page with sample data; the phone
 screenshots above were taken from it.
 
-## How it works
+## Design docs
 
 [docs/DESIGN.md](docs/DESIGN.md) records **why** each behaviour is the way it is: how the CLI is
 driven over `stream-json`, session id ownership, the turn lifecycle, and how the phone page reuses
@@ -113,6 +113,16 @@ them.
 
 Issues and PRs are welcome. Please report security problems privately; see [SECURITY.md](SECURITY.md). Please run `npm test` before opening a PR, and read the section of
 `docs/DESIGN.md` that covers the area you change: much of the odd-looking code is there on purpose.
+
+## Support
+
+Dev Hub is free and MIT. If it saves you time, a tip keeps it going:
+
+**USDT on TRON (TRC20):** `TPUmiba6BHzfLQ8HNnyS8H4jjNksmDNg6J`
+
+> Send only USDT, and only on the TRON (TRC20) network. Anything else sent to this address is lost.
+
+A ⭐ on GitHub or a review on the [Marketplace](https://marketplace.visualstudio.com/items?itemName=tyronna.dev-hub-claude-codex&ssr=false#review-details) helps just as much.
 
 ## License
 
