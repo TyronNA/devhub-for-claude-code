@@ -1,0 +1,27 @@
+name: Publish
+# Manual on purpose: run it after a GitHub release (`gh workflow run publish.yml`).
+# Marketplace uses Trusted Publishing (OIDC), so the policy on the publisher page must name this file.
+# Open VSX is skipped until the OVSX_PAT secret exists.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-save typescript@5.9
+      - run: npm test
+      - name: VS Code Marketplace
+        run: npx -y @vscode/vsce publish --oidc
+      - name: Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then echo "OVSX_PAT not set, skipping Open VSX"; exit 0; fi
+          npx -y ovsx publish -p "$OVSX_PAT"

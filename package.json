@@ -723,7 +723,7 @@
     ]
   },
   "files": [
-    "dist",
+    "dist/src",
     "media",
     "README.md",
     "LICENSE"
