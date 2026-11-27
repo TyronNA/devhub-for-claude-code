@@ -24,4 +24,6 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           if [ -z "$OVSX_PAT" ]; then echo "OVSX_PAT not set, skipping Open VSX"; exit 0; fi
+          # First run creates the namespace; afterwards it already exists, which is fine.
+          npx -y ovsx create-namespace "$(node -p 'require("./package.json").publisher')" -p "$OVSX_PAT" || true
           npx -y ovsx publish -p "$OVSX_PAT"
