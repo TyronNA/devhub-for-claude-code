@@ -2,9 +2,18 @@
   "name": "dev-hub-claude-codex",
   "displayName": "Dev Hub for Claude Code",
   "description": "Run Claude Code sessions across many repos from one VS Code window, plus a phone-friendly web page for the same chats. Unofficial; not affiliated with Anthropic.",
-  "version": "0.29.76",
+  "version": "0.29.77",
   "publisher": "local-devhub",
   "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1C1F2B",
+    "theme": "dark"
+  },
+  "homepage": "https://github.com/TyronNA/devhub-for-claude-code#readme",
+  "bugs": {
+    "url": "https://github.com/TyronNA/devhub-for-claude-code/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/TyronNA/devhub-for-claude-code"
@@ -13,7 +22,20 @@
     "vscode": "^1.95.0"
   },
   "categories": [
+    "AI",
+    "Chat",
     "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "anthropic",
+    "ai",
+    "agent",
+    "multi-repo",
+    "sessions",
+    "mobile",
+    "remote"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -36,6 +58,12 @@
   },
   "contributes": {
     "commands": [
+      {
+        "command": "devhub.getStarted",
+        "title": "Dev Hub: Get Started",
+        "icon": "$(rocket)",
+        "shortTitle": "Get Started"
+      },
       {
         "command": "devhub.searchProject",
         "title": "Dev Hub: Search Project & Start Chat",

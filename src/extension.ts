@@ -19,6 +19,7 @@ import { StatusBarController } from './devhub/views/statusBarController';
 import { altRootFor, isUnder, toggleAltRoot } from './devhub/providers/claude/claudeAccount';
 import { CliUpdateStatus } from './devhub/views/cliUpdateStatus';
 import { updateCommandFor } from './devhub/providers/cliVersion';
+import { checkClaudeSetup, installOptions, isNotLoggedInError, resolveClaudeExecutable } from './devhub/providers/claude/claudeSetup';
 import { registerCommands } from './devhub/commands';
 import { providerLabel } from './devhub/ui/format';
 import { findRestorableSession } from './devhub/sessions/selection';
@@ -30,8 +31,8 @@ let manager:SessionManager|undefined;let chat:ChatPanelProvider|undefined;let st
 export async function activate(context:any){
   setMediaRoot(vscode.Uri.joinPath(context.extensionUri,'media').fsPath);
   const output=vscode.window.createOutputChannel('Dev Hub');context.subscriptions.push(output);output.appendLine('Dev Hub activating');
-  const storageDir=context.globalStorageUri.fsPath;const workspaceStore=new WorkspaceStore(storageDir);const sessionStore=new SessionStore(storageDir);const workspaces=new WorkspaceService(workspaceStore,new ProjectResolver());const runner=new ProcessRunner();const cfg=vscode.workspace.getConfiguration('devHub');const maxHistory=cfg.get('history.maxFilesPerProvider',1500);
-  const providers:any={claude:new ClaudeProvider(runner,cfg.get('claude.executable','claude'),maxHistory,undefined,cfg.get('claude.permissionMode','')||undefined,cfg.get('claude.appendSystemPrompt','')||undefined,Math.max(0,cfg.get('claude.sessionIdleMinutes',30))*60000,cfg.get('claude.autoCompact','auto')||undefined,cfg.get('claude.mcp','inherit')==='none',cfg.get('claude.artifacts',true),cfg.get('claude.promptCacheTtl','')||undefined),planner:new PlannerProvider(cfg.get('planner.endpoint','')||undefined)};manager=new SessionManager(sessionStore,providers,cfg.get('maxConcurrentTurns',4));
+  const storageDir=context.globalStorageUri.fsPath;const workspaceStore=new WorkspaceStore(storageDir);const sessionStore=new SessionStore(storageDir);const workspaces=new WorkspaceService(workspaceStore,new ProjectResolver());const runner=new ProcessRunner();const claudeExe=resolveClaudeExecutable(vscode.workspace.getConfiguration('devHub').get('claude.executable','claude'));const cfg=vscode.workspace.getConfiguration('devHub');const maxHistory=cfg.get('history.maxFilesPerProvider',1500);
+  const providers:any={claude:new ClaudeProvider(runner,claudeExe,maxHistory,undefined,cfg.get('claude.permissionMode','')||undefined,cfg.get('claude.appendSystemPrompt','')||undefined,Math.max(0,cfg.get('claude.sessionIdleMinutes',30))*60000,cfg.get('claude.autoCompact','auto')||undefined,cfg.get('claude.mcp','inherit')==='none',cfg.get('claude.artifacts',true),cfg.get('claude.promptCacheTtl','')||undefined),planner:new PlannerProvider(cfg.get('planner.endpoint','')||undefined)};manager=new SessionManager(sessionStore,providers,cfg.get('maxConcurrentTurns',4));
   const tree=new DevHubTreeProvider(workspaces,sessionStore,{
     get:()=>context.globalState.get('devhub.pinnedPorts',[]) as number[],
     set:(v:number[])=>void context.globalState.update('devhub.pinnedPorts',v)},
@@ -62,7 +63,7 @@ export async function activate(context:any){
     vscode.window[r.level==='error'?'showErrorMessage':r.level==='warn'?'showWarningMessage':'showInformationMessage'](`Dev Hub: ${r.message}`);
   }));
   const cliUpdate=new CliUpdateStatus(runner,
-    ()=>{const c=vscode.workspace.getConfiguration('devHub');return {claude:c.get('claude.executable','claude')};},
+    ()=>{const c=vscode.workspace.getConfiguration('devHub');return {claude:resolveClaudeExecutable(c.get('claude.executable','claude'))};},
     {get:()=>context.globalState.get('devhub.cliVersionCache',{}),set:(v:any)=>void context.globalState.update('devhub.cliVersionCache',v)},
     ()=>vscode.workspace.getConfiguration('devHub').get('cliUpdateCheck',true));
   context.subscriptions.push(cliUpdate);
@@ -97,6 +98,50 @@ export async function activate(context:any){
     if(go!=='Run')return;
     const term=vscode.window.createTerminal('Dev Hub CLI update');term.show(true);term.sendText(cmd);
   }));
+  // First-run guide: install the CLI, log in, add a project. Each step only opens what the user then confirms.
+  const probeSetup=async()=>{const s=await checkClaudeSetup(runner,claudeExe);tree.setClaudeSetup(s);return s;};
+  let setupPoll:any;const pollUntil=(done:()=>Promise<boolean>,ms:number,limitMs:number)=>{clearInterval(setupPoll);const until=Date.now()+limitMs;
+    setupPoll=setInterval(async()=>{if(Date.now()>until)return void clearInterval(setupPoll);if(await done())clearInterval(setupPoll);},ms);};
+  context.subscriptions.push({dispose:()=>clearInterval(setupPoll)});
+  // The provider was built with the executable found at activation; a CLI installed since only takes effect after a reload.
+  const installedSince=async()=>{const now=resolveClaudeExecutable(vscode.workspace.getConfiguration('devHub').get('claude.executable','claude'));return now!==claudeExe&&await runner.isAvailable(now);};
+  const offerReload=async()=>{if(await vscode.window.showInformationMessage('Dev Hub: Claude Code is installed. Reload the window to start using it.','Reload Window')==='Reload Window')await vscode.commands.executeCommand('workbench.action.reloadWindow');};
+  const shellQuote=(exe:string)=>exe==='claude'?exe:process.platform==='win32'?`& "${exe}"`:`'${exe.replace(/'/g,"'\\''")}'`;
+  context.subscriptions.push(vscode.commands.registerCommand('devhub.getStarted',async()=>{
+    const state=await probeSetup();
+    if(state==='missing'){
+      if(await installedSince())return void offerReload();
+      const pick=await vscode.window.showQuickPick(installOptions().map(o=>({label:o.label+(o.recommended?' (recommended)':''),description:o.command,detail:o.detail,o})),
+        {placeHolder:'Dev Hub needs the Claude Code CLI. How do you want to install it?',ignoreFocusOut:true});
+      if(!pick)return;
+      const term=vscode.window.createTerminal('Claude Code setup');term.show();
+      // Not executed: an installer piped from the internet runs only after the user reads it and presses Enter.
+      term.sendText(pick.o.command,false);
+      void vscode.window.showInformationMessage('Dev Hub: press Enter in the "Claude Code setup" terminal to install. Dev Hub notices when it is done.');
+      pollUntil(async()=>{if(await runner.isAvailable(claudeExe)){await probeSetup();void vscode.commands.executeCommand('devhub.getStarted');return true;}
+        if(await installedSince()){void offerReload();return true;}return false;},4000,15*60000);
+      return;
+    }
+    if(state==='loggedOut'){
+      const term=vscode.window.createTerminal('Claude Code login');term.show();term.sendText(shellQuote(claudeExe)+' auth login');
+      void vscode.window.showInformationMessage('Dev Hub: finish signing in in your browser. Claude Code needs a Pro, Max, Team, Enterprise or Console account; the free plan does not include it.');
+      pollUntil(async()=>{if(await probeSetup()!=='ready')return false;void vscode.window.showInformationMessage('Dev Hub: Claude Code is signed in.');void vscode.commands.executeCommand('devhub.getStarted');return true;},3000,10*60000);
+      return;
+    }
+    const snap=await workspaces.snapshot();
+    if(!snap.projects.length){
+      const ws=snap.workspaces[0]||await workspaces.createWorkspace('Projects');tree.refresh();
+      return void vscode.commands.executeCommand('devhub.addProject',{type:'workspace',data:{workspace:ws}});
+    }
+    await vscode.commands.executeCommand('devhub.searchProject');
+  }));
+  void probeSetup();
+  let authNoticeAt=0;
+  manager.on('event',(x:any)=>{
+    if(x?.event?.type!=='error'||!isNotLoggedInError(x.event.message))return;
+    tree.setClaudeSetup('loggedOut');if(Date.now()-authNoticeAt<60000)return;authNoticeAt=Date.now();
+    void vscode.window.showErrorMessage('Dev Hub: Claude Code is not signed in.','Log in').then((a:any)=>{if(a==='Log in')void vscode.commands.executeCommand('devhub.getStarted');});
+  });
   chat=new ChatPanelProvider(manager,providers,async()=>{const s=await workspaces.snapshot();return {workspaces:s.workspaces,projects:s.projects};},s=>{status?.setSelected(s);if(s)context.globalState.update('devhub.lastSession',{provider:s.provider,nativeSessionId:s.nativeSessionId});},()=>{tree.refreshRows();status?.update();},()=>{status?.update();},storageDir,vscode.Uri.joinPath(context.extensionUri,'media').fsPath,(prov:string,id:string)=>sessionStore.get(prov,id),
     (prov:string,sid:string,rid:string,allow:boolean,updatedInput?:any)=>providers[prov]?.answerPermission?.(sid,rid,
       allow?(updatedInput?{behavior:'allow',updatedInput}:{behavior:'allow'}):{behavior:'deny',message:'Denied in Dev Hub'}),

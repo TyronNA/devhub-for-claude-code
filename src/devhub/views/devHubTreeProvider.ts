@@ -11,8 +11,13 @@ import { cliMemoryMB } from '../providers/processMemory';
 import { PlannerClient, PlannerTask } from '../providers/planner/plannerClient';
 import { chatSession, endpointOf, isHttpAgent, sortTasks, taskRow, taskSession } from '../agents/plannerTasks';
 
-export type DevHubTreeNode = {type:'workspace'|'project'|'session'|'more'|'recent'|'ports'|'portGroup'|'port'|'agents'|'agent'|'agentThread'|'agentMore'|'plannerChat'|'plannerTask'|'plannerEmpty'|'plannerOffline'|'newchat'|'mobileapp'; data:any; workspace?:any; project?:any};
+export type DevHubTreeNode = {type:'workspace'|'project'|'session'|'more'|'recent'|'ports'|'portGroup'|'port'|'agents'|'agent'|'agentThread'|'agentMore'|'plannerChat'|'plannerTask'|'plannerEmpty'|'plannerOffline'|'newchat'|'mobileapp'|'setup'; data:any; workspace?:any; project?:any};
 
+const SETUP_ROWS:{[step:string]:{label:string;icon:string;color:string;tooltip:string}}={
+  missing:{label:'Install Claude Code\u2026',icon:'warning',color:'charts.yellow',tooltip:'Dev Hub runs the Claude Code CLI, and it is not installed on this machine yet'},
+  loggedOut:{label:'Log in to Claude Code\u2026',icon:'warning',color:'charts.yellow',tooltip:'Claude Code is installed but not signed in to a Claude account'},
+  project:{label:'Add your first project\u2026',icon:'add',color:'charts.green',tooltip:'Pick any folder; Dev Hub never adds it to your VS Code workspace'},
+};
 const FIRST_PAGE=3;   // every project opens only 3 sessions — the tree stays readable
 const PAGE_STEP=5;    // each "More" click adds 5
 const RECENT_LIMIT=8;
@@ -95,6 +100,9 @@ export class DevHubTreeProvider {
               private livePids?:()=>number[]){
     for(const p of pinStore?.get?.()??[])if(Number.isInteger(p))this.pins.add(p);
   }
+  /** Set by the host after probing the CLI; undefined until the first probe, so a working setup never flashes a warning. */
+  private claudeSetup?:string;
+  setClaudeSetup(state:string){if(state===this.claudeSetup)return;this.claudeSetup=state;this.refreshRows();}
   pinnedPorts(){return [...this.pins].sort((a,b)=>a-b);}
   setPinned(port:number,on:boolean){
     if(!Number.isInteger(port))return;
@@ -212,6 +220,9 @@ export class DevHubTreeProvider {
     if(element)return [];
     const [snap,sessionList]=await Promise.all([this.workspaces.snapshot(),this.sessions.list()]);
     const nodes:DevHubTreeNode[]=buildTreeModel(snap.workspaces,snap.projects,sessionList).map(w=>({type:'workspace',data:w,workspace:w.workspace}));
+    // First run: a fresh install shows only Ports and "Open on phone", with nothing saying what to do next.
+    const step=this.claudeSetup==='missing'||this.claudeSetup==='loggedOut'?this.claudeSetup:snap.projects.length?undefined:'project';
+    if(step)nodes.unshift({type:'setup',data:{step}});
     const recent=recentSessions(sessionList,RECENT_LIMIT);
     if(recent.length)nodes.push({type:'recent',data:{sessions:recent,projects:snap.projects}});
     nodes.push({type:'ports',data:{}});
@@ -237,6 +248,13 @@ export class DevHubTreeProvider {
       item.contextValue='devhubNewChat';item.iconPath=new vscode.ThemeIcon('add',new vscode.ThemeColor('charts.green'));
       item.tooltip='Pick a project, then a provider  (\u2325\u2318J)';
       item.command={command:'devhub.searchProject',title:'New chat'};
+      return item;
+    }
+    if(node.type==='setup'){
+      const s=SETUP_ROWS[node.data.step as string];
+      const item=new vscode.TreeItem(s.label,vscode.TreeItemCollapsibleState.None);
+      item.contextValue='devhubSetup';item.iconPath=new vscode.ThemeIcon(s.icon,new vscode.ThemeColor(s.color));
+      item.tooltip=s.tooltip;item.command={command:'devhub.getStarted',title:'Get started'};
       return item;
     }
     if(node.type==='mobileapp'){

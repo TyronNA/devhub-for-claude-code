@@ -79,24 +79,54 @@ and memory work exactly as they do in a terminal.
 
 ## Requirements
 
-- VS Code **1.95** or newer
-- [Claude Code](https://claude.com/claude-code) CLI on your `PATH`, already logged in. Check with `claude --version`.
+- VS Code **1.95** or newer.
+- A Claude **Pro, Max, Team or Enterprise** plan, or an Anthropic Console account. The free
+  claude.ai plan does not include Claude Code.
 - macOS or Linux. Windows has not been tested; the ports panel uses `lsof`.
+- The [Claude Code](https://code.claude.com/docs/en/setup) CLI. You don't need to install it first:
+  Dev Hub walks you through it.
 
 ## Install
 
 1. Download the latest `dev-hub-claude-codex-*.vsix` from
    [Releases](https://github.com/TyronNA/devhub-for-claude-code/releases).
-2. Install it:
-   ```bash
-   code --install-extension dev-hub-claude-codex-*.vsix
-   ```
-   Or use **Extensions → … → Install from VSIX…**
-3. Run **Developer: Reload Window**, then open the **Dev Hub** icon in the activity bar.
+2. In VS Code open the Extensions view, click **…** at its top right, choose
+   **Install from VSIX…** and pick the file. From a terminal this is
+   `code --install-extension dev-hub-claude-codex-*.vsix`.
+3. Click the **Dev Hub** icon in the activity bar on the left.
+
+## First run
+
+The top row of the Dev Hub sidebar always shows the next thing to do. Click it, and it disappears
+once everything works.
+
+<img src="https://raw.githubusercontent.com/TyronNA/devhub-for-claude-code/main/docs/images/first-run.png" width="720" alt="The Install Claude Code row and the installer picker">
+
+| Row | What happens when you click it |
+|---|---|
+| ⚠️ **Install Claude Code…** | Pick an installer (the official one is first). Dev Hub opens a terminal with the command already typed. Read it, press **Enter**, and Dev Hub notices when it finishes. If it asks you to, click **Reload Window**. |
+| ⚠️ **Log in to Claude Code…** | Your browser opens the Claude sign-in page. Sign in and come back. The row goes away by itself. |
+| ➕ **Add your first project…** | Pick any folder with code in it. It is not added to your VS Code workspace. |
+
+After that, click **New chat…** at the bottom of the sidebar and type what you want done. The same
+steps are always available as **Dev Hub: Get Started** in the command palette (`⇧⌘P` / `Ctrl+Shift+P`).
+
+<details>
+<summary>Prefer to set up Claude Code by hand?</summary>
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash   # or: brew install --cask claude-code
+claude auth login                                # sign in in the browser
+claude --version                                 # prints a version when it worked
+```
+
+If you installed it somewhere unusual, put its full path in the `devHub.claude.executable` setting.
+</details>
 
 ## Quick start
 
-1. **Dev Hub: Add Workspace**, then give it a name such as `Work`.
+1. **Dev Hub: Add Workspace**, then give it a name such as `Work`. Workspaces are only folders
+   in the sidebar, so one is enough to start.
 2. **Dev Hub: Add Project**, then pick a repo folder. The repo is stored as a path only.
 3. Click **New Claude Chat** on the project row and type a prompt.
 

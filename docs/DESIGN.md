@@ -926,10 +926,36 @@ extension spawns; turning the setting off passes **no** variable at all, leaving
 default in place rather than forcing artifacts off. Publishing still goes through the normal
 permission request, so a chat cannot upload a page without the usual approval.
 
+## First run
+
+A fresh install has nothing to show, and the people most likely to stall are the ones who have never
+installed a CLI. On activation Dev Hub runs `claude --version` and `claude auth status --json` (JSON,
+exit 1 when signed out) and puts one row at the top of the tree: **Install Claude Code…**, **Log in to
+Claude Code…** or **Add your first project…**. Every row runs `devhub.getStarted`, which moves to the
+next missing step:
+
+- **Install** offers the commands from the official setup page (installer script, Homebrew/WinGet,
+  npm) and types the chosen one into a terminal **without pressing Enter**: an installer piped from
+  the internet runs only after the user has read it. Dev Hub then polls every 4 s for 15 minutes.
+- VS Code captures `PATH` at launch, so a CLI the installer just put in `~/.local/bin` is invisible to
+  it. With the default `devHub.claude.executable` (`claude`), Dev Hub also looks in `~/.local/bin`,
+  `/opt/homebrew/bin`, `/usr/local/bin` and `~/.claude/local`. A configured path or wrapper is never
+  second-guessed. A CLI found only after activation needs **Reload Window**, which Dev Hub offers,
+  because the provider keeps the executable it was built with.
+- **Log in** runs `claude auth login` (browser sign-in) and polls until `auth status` says signed in.
+  The free claude.ai plan does not include Claude Code, and the prompt says so.
+- **Add project** creates a workspace named `Projects` when there is none, then opens the folder
+  picker.
+
+A turn that fails with the CLI's "Not logged in · Please run /login" is rewritten in the chat: `/login`
+does not work over stream-json, so the message points at **Dev Hub: Get Started** instead, and a
+notification offers **Log in** (at most once a minute).
+
 ## Commands
 
 | Command | Title | Key |
 |---|---|---|
+| `devhub.getStarted` | Get Started |  |
 | `devhub.searchProject` | Search Project & Start Chat | `cmd+alt+j` |
 | `devhub.addWorkspace` | Add Workspace |  |
 | `devhub.renameWorkspace` | Rename Workspace |  |

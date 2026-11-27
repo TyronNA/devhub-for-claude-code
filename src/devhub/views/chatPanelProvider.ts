@@ -182,7 +182,7 @@ export class ChatPanelProvider {
 
   async newChat(workspace:DevHubWorkspace,project:DevHubProject,provider:ProviderId){
     const adapter=this.providers[provider];
-    if(!adapter||!await adapter.isAvailable())throw new Error(`${providerLabel(provider)} unavailable — configure devHub.${provider}.${provider==='planner'?'endpoint':'executable'}`);
+    if(!adapter||!await adapter.isAvailable())throw new Error(provider==='claude'?'Claude Code is not installed — run "Dev Hub: Get Started" from the command palette or the Dev Hub sidebar.':`${providerLabel(provider)} unavailable — configure devHub.planner.endpoint`);
     const draft:Draft={workspace,project,provider};
     const d=defaultsFor(provider);
     const tab=this.createTab(`draft:${crypto.randomUUID()}`,{draft,workspace,project,model:d.model,effort:d.effort});

@@ -388,3 +388,24 @@ test('Recent carries the RAM its live CLI processes are holding',async()=>{
     assert.equal((hot as any).portsCache,undefined);
   }finally{Module._load=original;}
 });
+
+test('first run: one setup row on top, walking install → log in → add project, then gone',async()=>{
+  const original=Module._load;
+  Module._load=function(r:string){if(r==='vscode')return vscodeMock;return original.apply(this,arguments as any);};
+  try{
+    delete require.cache[require.resolve('../../src/devhub/views/devHubTreeProvider')];
+    const {DevHubTreeProvider}=require('../../src/devhub/views/devHubTreeProvider');
+    let projects:any[]=[];
+    const tree=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects})},{list:async()=>[]});
+    const top=async()=>{const r=await tree.getChildren();return r[0].type==='setup'?r[0].data.step:undefined;};
+    // Not probed yet: no warning flash for a machine that is already set up, only the missing project.
+    assert.equal(await top(),'project');
+    tree.setClaudeSetup('missing');assert.equal(await top(),'missing');
+    const row=tree.getTreeItem((await tree.getChildren())[0]);
+    assert.equal(row.label,'Install Claude Code…');assert.equal(row.command.command,'devhub.getStarted');
+    tree.setClaudeSetup('loggedOut');assert.equal(await top(),'loggedOut');
+    tree.setClaudeSetup('ready');assert.equal(await top(),'project');
+    projects=[{id:'p',workspaceId:'w',name:'P',rootPath:'/tmp/p'}];
+    assert.equal(await top(),undefined,'a working setup has no setup row');
+  } finally { Module._load=original; }
+});

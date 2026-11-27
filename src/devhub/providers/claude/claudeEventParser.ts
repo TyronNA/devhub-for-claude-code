@@ -1,4 +1,7 @@
 import { DevHubEvent } from '../../types';
+import { isNotLoggedInError } from './claudeSetup';
+// `/login` doesn't work over stream-json, so the CLI's own hint would send the user nowhere.
+const NOT_LOGGED_IN='Claude Code is not signed in. Run "Dev Hub: Get Started" (or `claude auth login` in a terminal), then send again.';
 const nodePath=require('node:path');
 const os=require('node:os');
 const fsSync=require('node:fs');
@@ -242,7 +245,7 @@ export class ClaudeEventParser {
         contextWindowTokens:usage?.context_window_tokens ?? deriveContext(raw).window,
         costUsd:raw.total_cost_usd
       },timestamp:t});
-      if(raw.is_error || raw.subtype==='error') out.push({type:'error',message:String(raw.error||raw.result||'Claude turn failed'),timestamp:t}); else out.push({type:'turn_done',timestamp:t});
+      if(raw.is_error || raw.subtype==='error'){const m=String(raw.error||raw.result||'Claude turn failed');out.push({type:'error',message:isNotLoggedInError(m)?NOT_LOGGED_IN:m,timestamp:t});} else out.push({type:'turn_done',timestamp:t});
     } else if(raw.type==='error') out.push({type:'error',message:String(raw.error?.message||raw.message||'Claude error'),timestamp:t});
     return out;
   }
