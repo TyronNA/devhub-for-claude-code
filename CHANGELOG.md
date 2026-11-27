@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.29.78 — Marketplace publisher
+
+- **Publisher is now `tyronna`**, so the extension id becomes `tyronna.dev-hub-claude-codex`, ready for
+  the VS Code Marketplace and Open VSX. VS Code treats it as a new extension: uninstall
+  `local-devhub.dev-hub-claude-codex` first. Its registered projects and chat list live under the old id's
+  storage and do not carry over; chat transcripts in `~/.claude` are untouched and show up
+  again once the projects are re-added.
+- The `.vsix` ships only `dist/src`; the compiled tests no longer ride along when `vsce` packages it.
+- New manual `Publish` workflow: Marketplace via Trusted Publishing (no token), Open VSX via the
+  `OVSX_PAT` secret. Not run yet.
+
 ## 0.29.77 — first-run setup, English UI
 
 - **A fresh install now says what to do next.** The top row of the sidebar walks through

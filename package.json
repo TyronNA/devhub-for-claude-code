@@ -2,8 +2,8 @@
   "name": "dev-hub-claude-codex",
   "displayName": "Dev Hub for Claude Code",
   "description": "Run Claude Code sessions across many repos from one VS Code window, plus a phone-friendly web page for the same chats. Unofficial; not affiliated with Anthropic.",
-  "version": "0.29.77",
-  "publisher": "local-devhub",
+  "version": "0.29.78",
+  "publisher": "tyronna",
   "license": "MIT",
   "icon": "media/icon.png",
   "galleryBanner": {

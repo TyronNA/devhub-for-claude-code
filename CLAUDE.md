@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An unofficial VS Code extension (`dev-hub-claude-codex`, publisher `local-devhub`, distributed as a
-`.vsix` from GitHub releases) that runs **Claude Code** CLI sessions across many repos from one
+An unofficial VS Code extension (`dev-hub-claude-codex`, publisher `tyronna`, distributed as a
+`.vsix` from GitHub releases and on the Marketplace / Open VSX) that runs **Claude Code** CLI sessions across many repos from one
 window, without adding those repos as workspace folders. Registered projects are paths only; each
 chat spawns a CLI with the project as `cwd`.
 
