@@ -4,8 +4,8 @@ const http=require('node:http');
 import { PlannerWatcher, PlannerReminderPush } from '../../src/devhub/providers/planner/plannerWatcher';
 
 /**
- * Daemon giả chỉ có `/stream`: watcher phải giữ ống mở khi KHÔNG có lượt nào chạy — đó là cả
- * lý do nó tồn tại. `messages` trả lời `/conversations/{id}/messages`.
+ * A fake daemon with only `/stream`: the watcher must keep the pipe open while NO turn runs — that is the whole
+ * reason it exists. `messages` answers `/conversations/{id}/messages`.
  */
 function fakeDaemon(messages:any[]=[],port=0){
   let sse:any;const conns:any[]=[];
@@ -38,14 +38,14 @@ test('a fired reminder reaches the host with no turn in flight',async()=>{
   const w=new PlannerWatcher(p=>got.push(p));
   try{
     w.watch([d.endpoint]);
-    assert.ok(await d.ready(),'watcher phải tự mở /stream, không chờ lượt nào');
+    assert.ok(await d.ready(),'the watcher must open /stream by itself, not wait for a turn');
     d.frame('reminder_fired',{conversation_id:'chat:agent-acme',payload:{
-      reminder_id:7,note:'báo khi có plan',jira_key:'KRP-11922',
+      reminder_id:7,note:'tell me when there is a plan',jira_key:'KRP-11922',
       moved:['ANALYZING','WAITING_APPROVAL'],reply:'plan v1 xong, confidence 0.6'}});
     await settle();
     assert.equal(got.length,1);
     assert.deepEqual({...got[0],endpoint:''},{endpoint:'',conversationId:'chat:agent-acme',
-      reminderId:7,note:'báo khi có plan',jiraKey:'KRP-11922',
+      reminderId:7,note:'tell me when there is a plan',jiraKey:'KRP-11922',
       reply:'plan v1 xong, confidence 0.6',movedFrom:'ANALYZING',movedTo:'WAITING_APPROVAL'});
   } finally { w.dispose();await d.close(); }
 });
@@ -56,7 +56,7 @@ test('view and message frames are ignored — only reminder_fired carries a full
   const w=new PlannerWatcher(p=>got.push(p));
   try{
     w.watch([d.endpoint]);await d.ready();
-    // `view` là message bị edit tại chỗ; `message` chỉ là placeholder "⏳ processing".
+    // `view` is a message edited in place; `message` is only the "⏳ processing" placeholder.
     d.frame('view',{conversation_id:'chat:x',payload:{text:'⏳ processing… 2s'}});
     d.frame('message',{conversation_id:'chat:x',payload:{text:'⏳ processing…'}});
     d.frame('heartbeat',{});
@@ -72,7 +72,7 @@ test('a frame with no conversation id is dropped rather than fired at a random t
   const w=new PlannerWatcher(p=>got.push(p));
   try{
     w.watch([d.endpoint]);await d.ready();
-    d.frame('reminder_fired',{payload:{note:'mồ côi',reply:'x'}});
+    d.frame('reminder_fired',{payload:{note:'orphan',reply:'x'}});
     await settle();
     assert.deepEqual(got,[]);
   } finally { w.dispose();await d.close(); }
@@ -84,8 +84,8 @@ test('the watch reconnects after the daemon drops the stream',async()=>{
   const w=new PlannerWatcher(p=>got.push(p));
   try{
     w.watch([d.endpoint]);await d.ready();
-    d.drop();                       // `make restart` bên daemon
-    assert.ok(await d.ready(),'phải tự nối lại, không chờ ai bấm gì');
+    d.drop();                       // `make restart` on the daemon side
+    assert.ok(await d.ready(),'must reconnect by itself, without waiting for anyone to click');
     d.frame('reminder_fired',{conversation_id:'chat:x',payload:{note:'sau restart',reply:'ok'}});
     await settle();
     assert.deepEqual(got.map(g=>g.note),['sau restart']);
@@ -100,30 +100,30 @@ test('an endpoint dropped from settings stops being watched',async()=>{
     w.watch([d.endpoint]);await d.ready();
     w.watch([]);
     await settle();
-    d.frame('reminder_fired',{conversation_id:'chat:x',payload:{note:'không ai nghe',reply:'x'}});
+    d.frame('reminder_fired',{conversation_id:'chat:x',payload:{note:'nobody listening',reply:'x'}});
     await settle();
-    assert.deepEqual(got,[],'bỏ agent khỏi settings là bỏ luôn ống');
+    assert.deepEqual(got,[],'removing the agent from settings also drops the pipe');
   } finally { w.dispose();await d.close(); }
 });
 
 test('a planner transcript carries the stored turns, so a reminder survives a closed panel',async()=>{
   const {PlannerProvider}=require('../../src/devhub/providers/planner/plannerProvider');
   const d=await fakeDaemon([
-    {role:'user',text:'lên plan ticket',created_at:1000},
-    {role:'assistant',text:'đã kéo vào inbox',created_at:1001},
-    {role:'user',text:'[scheduled check] báo khi có plan',created_at:1002},
-    {role:'assistant',text:'plan v1 xong rồi',created_at:1003},
+    {role:'user',text:'plan the ticket',created_at:1000},
+    {role:'assistant',text:'pulled into the inbox',created_at:1001},
+    {role:'user',text:'[scheduled check] tell me when there is a plan',created_at:1002},
+    {role:'assistant',text:'plan v1 is done',created_at:1003},
   ]);
   try{
     const events=await new PlannerProvider(d.endpoint).loadTranscript(
       {provider:'planner',nativeSessionId:'chat:agent-acme',updatedAt:2000} as any);
     assert.deepEqual(events.map((e:any)=>[e.type,e.text]),[
-      ['user_message','lên plan ticket'],
-      ['assistant_message','đã kéo vào inbox'],
-      ['user_message','[scheduled check] báo khi có plan'],
-      ['assistant_message','plan v1 xong rồi'],
+      ['user_message','plan the ticket'],
+      ['assistant_message','pulled into the inbox'],
+      ['user_message','[scheduled check] tell me when there is a plan'],
+      ['assistant_message','plan v1 is done'],
     ]);
-    assert.equal(events[0].timestamp,1000*1000,'epoch giây của daemon -> ms');
+    assert.equal(events[0].timestamp,1000*1000,'the daemon\'s epoch seconds -> ms');
   } finally { await d.close(); }
 });
 
@@ -134,13 +134,13 @@ test('an old daemon without the messages endpoint still opens a tab',async()=>{
   try{
     const events=await new PlannerProvider(`http://127.0.0.1:${server.address().port}`)
       .loadTranscript({provider:'planner',nativeSessionId:'chat:x',updatedAt:1} as any);
-    assert.deepEqual(events,[],'404 không được ném ra ngoài');
+    assert.deepEqual(events,[],'404 must not be thrown');
   } finally { await new Promise<void>(r=>server.close(()=>r())); }
 });
 
 /**
- * Daemon tắt hẳn thì watcher retry 30s/lần mãi mãi; in mỗi lần một dòng là 500 dòng một đêm và
- * mọi dòng log khác của extension chìm theo. Log phải theo chuyển trạng thái.
+ * With the daemon fully off the watcher retries every 30s forever; a line per attempt is 500 lines a night and
+ * drowns every other log line of the extension. Logging must follow state transitions.
  */
 test('a daemon that stays down is logged once, not once per retry',async()=>{
   const d=await fakeDaemon();const port=d.port;
@@ -150,14 +150,14 @@ test('a daemon that stays down is logged once, not once per retry',async()=>{
   try{
     w.watch([d.endpoint]);assert.ok(await d.ready());
     await d.close();
-    // Backoff 1s→2s→5s: 3.2s phủ đúng hai lần thử hỏng, đủ để bắt lỗi in trùng.
+    // Backoff 1s→2s→5s: 3.2s covers exactly two failed attempts, enough to catch duplicate logging.
     await new Promise(r=>setTimeout(r,3200));
-    assert.equal(log.filter(l=>l.includes('error')).length,1,'nhiều lần thử hỏng chỉ được một dòng');
+    assert.equal(log.filter(l=>l.includes('error')).length,1,'many failed attempts give only one line');
     back=await fakeDaemon([],port);
     back.frame('ping',{});
-    for(let i=0;i<120&&!log.some(l=>l.includes('nối lại được'));i++){
+    for(let i=0;i<120&&!log.some(l=>l.includes('reconnected'));i++){
       await new Promise(r=>setTimeout(r,100));back.frame('ping',{});
     }
-    assert.ok(log.some(l=>l.includes('nối lại được')),'nối lại được phải có một dòng');
+    assert.ok(log.some(l=>l.includes('reconnected')),'reconnecting must log one line');
   } finally { w.dispose();if(back)await back.close(); }
 });

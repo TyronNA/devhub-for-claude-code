@@ -11,13 +11,13 @@ test('usage aggregator sums tokens but never sums quota percentages',()=>{
 
 test('reopening an old session cannot make its old quota outrank a freshly observed one',()=>{
   const now=Date.now();
-  // Hàng mở lại có updatedAt=now nhưng ảnh quota của nó đã cũ.
+  // A reopened row has updatedAt=now but its quota snapshot is old.
   const fresh:any={provider:'claude',nativeSessionId:'a',workspaceId:'w',projectId:'p',cwd:'/a',title:'a',status:'done',createdAt:1,
     updatedAt:now-600_000,usage:{quota7dUsedPercentage:20,quota7dObservedAt:now-600_000}};
   const reopened:any={...fresh,nativeSessionId:'b',status:'imported',updatedAt:now,
     usage:{quota7dUsedPercentage:73,quota7dObservedAt:now-21*24*3600_000}};
   const s=new UsageAggregator().summarizeWorkspace('w',[fresh,reopened]);
-  assert.equal(s[0].quota7dUsedPercentage,20,'phải lấy ảnh đo mới nhất, không phải hàng vừa được ghi lại');
+  assert.equal(s[0].quota7dUsedPercentage,20,'must take the newest measurement, not the row just rewritten');
   assert.equal(s[0].quota7dObservedAt,now-600_000);
 });
 
@@ -37,7 +37,7 @@ test('quota stale detection only flags observed samples older than 15 minutes',(
   assert.equal(quotaIsStale(now-16*60_000,now),true);
 });
 
-test('model đã resolve lấy bản mới nhất, không bị lượt sau thiếu field xoá mất',()=>{
+test('the resolved model takes the newest value, not erased by a later turn missing the field',()=>{
   const a=mergeSessionUsage({inputTokens:5,model:'claude-opus-5'},{model:'claude-opus-5-5'});
   assert.equal(a.model,'claude-opus-5-5');assert.equal(a.inputTokens,5);
   assert.equal(mergeSessionUsage(a,{inputTokens:1}).model,'claude-opus-5-5');

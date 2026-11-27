@@ -8,8 +8,8 @@ import { ClaudeProvider } from '../../src/devhub/providers/claude/claudeProvider
 import { HistoryScanCache, boundedSet } from '../../src/devhub/providers/historyUtils';
 import { discoverClaudeHistory } from '../../src/devhub/providers/claude/claudeHistory';
 
-/** CLI giả: ghi argv + stdin ra file để test soi được prompt đi đường nào. */
-/** CLI giả nói stream-json hai chiều: ghi lại argv + prompt, rồi phát `result` để lượt kết thúc. */
+/** A fake CLI: writes argv + stdin to a file so the test can see which path the prompt took. */
+/** A fake CLI speaking two-way stream-json: records argv + prompt, then emits `result` so the turn ends. */
 async function echoCli(dump:string){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-echo-'));const file=path.join(dir,'cli');
   await fs.writeFile(file,`#!/usr/bin/env node
@@ -29,7 +29,7 @@ process.stdin.on('end',()=>process.exit(0));`,{mode:0o755});
   return file;
 }
 async function drain(h:any){const o=[];for await(const e of h.events)o.push(e);return o;}
-// Session thường trú giữ process con sống; test phải đóng nếu không node không thoát.
+// A resident session keeps the child process alive; the test must close it or node won't exit.
 const live:any[]=[];
 function track<T>(p:T):T{live.push(p);return p}
 test.after(()=>{for(const p of live)p.dispose&&p.dispose()});
@@ -39,8 +39,8 @@ test('Claude prompt travels on stdin and is absent from argv',async()=>{
   const exe=await echoCli(dump);const secret='PROMPT-SECRET-e2e';
   await drain(await track(new ClaudeProvider(new ProcessRunner(),exe,10)).start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:secret} as any));
   const got=JSON.parse(await fs.readFile(dump,'utf8'));
-  assert.equal(got.stdin,secret,'prompt phải tới CLI qua stdin');
-  assert.equal(got.argv.some((a:string)=>a.includes(secret)),false,'prompt KHÔNG được nằm trong argv (lộ qua ps)');
+  assert.equal(got.stdin,secret,'the prompt must reach the CLI via stdin');
+  assert.equal(got.argv.some((a:string)=>a.includes(secret)),false,'the prompt must NOT be in argv (visible through ps)');
 });
 
 test('permissionMode is forwarded only when configured',async()=>{
@@ -52,7 +52,7 @@ test('permissionMode is forwarded only when configured',async()=>{
 
   const d2=path.join(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-d-')),'d.json');
   await drain(await track(new ClaudeProvider(new ProcessRunner(),await echoCli(d2),10)).start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'x'} as any));
-  assert.equal(JSON.parse(await fs.readFile(d2,'utf8')).argv.includes('--permission-mode'),false,'không set thì không gửi cờ');
+  assert.equal(JSON.parse(await fs.readFile(d2,'utf8')).argv.includes('--permission-mode'),false,'not set means no flag sent');
 });
 
 test('history scan cache skips re-reading a file whose mtime and size are unchanged',async()=>{
@@ -62,7 +62,7 @@ test('history scan cache skips re-reading a file whose mtime and size are unchan
   const f=path.join(dir,'11111111-1111-1111-1111-111111111111.jsonl');
   const row=(t:string)=>JSON.stringify({type:'user',cwd,sessionId:'11111111-1111-1111-1111-111111111111',timestamp:'2026-01-01T00:00:00Z',message:{content:t}});
   await fs.writeFile(f,row('AAAA')+'\n');
-  // utimes chỉ có độ chính xác ms; ghim mtime TRƯỚC lần scan đầu để hai lần stat so khớp được.
+  // utimes is only ms-precise; pin mtime BEFORE the first scan so the two stats compare equal.
   const pinned=new Date(1767225600000);
   await fs.utimes(f,pinned,pinned);
   const projects=[{id:'p',workspaceId:'w',name:'p',rootPath:cwd}] as any;
@@ -71,17 +71,17 @@ test('history scan cache skips re-reading a file whose mtime and size are unchan
   const first=await discoverClaudeHistory(projects,root,50,new Map(),cache);
   assert.equal(first[0].title,'AAAA');
 
-  // Ghi nội dung khác NHƯNG giữ nguyên size + mtime -> cache hit thì phải trả về title cũ.
+  // Write different content BUT keep size + mtime -> a cache hit must return the old title.
   await fs.writeFile(f,row('BBBB')+'\n');
   await fs.utimes(f,pinned,pinned);
   const second=await discoverClaudeHistory(projects,root,50,new Map(),cache);
-  assert.equal(second[0].title,'AAAA','cache hit => không đọc lại file');
+  assert.equal(second[0].title,'AAAA','cache hit => the file is not re-read');
 
-  // Đổi mtime -> phải đọc lại.
+  // Change mtime -> must re-read.
   const later=new Date(pinned.getTime()+60000);
   await fs.utimes(f,later,later);
   const third=await discoverClaudeHistory(projects,root,50,new Map(),cache);
-  assert.equal(third[0].title,'BBBB','mtime đổi => đọc lại');
+  assert.equal(third[0].title,'BBBB','mtime changed => re-read');
 });
 
 test('bounded maps evict oldest entries instead of growing without limit',async()=>{
@@ -104,12 +104,12 @@ test('system prompt setting reaches Claude with its flag',async()=>{
   const a=JSON.parse(await fs.readFile(d1,'utf8')).argv;
   assert.equal(a.includes('--append-system-prompt'),true);
   assert.equal(a[a.indexOf('--append-system-prompt')+1],'BE TERSE');
-  // Cờ append tự tắt snapshot; không bật lại thì mọi chat cũ đổi system prompt ngay lần resume kế.
+  // The append flag turns the snapshot off itself; without turning it back on every old chat changes system prompt on its next resume.
   assert.equal(a[a.indexOf('--system-prompt-snapshot')+1],'on');
 
   const d3=path.join(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-d-')),'d.json');
   await drain(await track(new ClaudeProvider(new ProcessRunner(),await echoCli(d3),10)).start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'x'} as any));
   const c3=JSON.parse(await fs.readFile(d3,'utf8')).argv;
-  assert.equal(c3.includes('--append-system-prompt'),false,'không set thì không gửi');
-  assert.equal(c3.includes('--system-prompt-snapshot'),false,'không append thì snapshot vẫn là mặc định của CLI');
+  assert.equal(c3.includes('--append-system-prompt'),false,'not set means not sent');
+  assert.equal(c3.includes('--system-prompt-snapshot'),false,'without append the snapshot stays the CLI default');
 });

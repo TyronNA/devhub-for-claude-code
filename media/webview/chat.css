@@ -1,24 +1,24 @@
 :root{color-scheme:light dark;--accent:#8a8a8a;--accent-soft:rgba(138,138,138,.12);--strong:var(--vscode-editor-foreground)}
-/* `--vscode-foreground` KHÔNG sáng hơn chữ thường — Dark+ còn tối hơn (#CCCCCC so với
-   editor #D4D4D4), 2026-dark thì gần như trùng — nên bold cũ chỉ khác ở weight và nhìn nhạt.
-   Đẩy contrast theo đúng hướng của theme, giữ nguyên hue. VS Code gắn class này lên body;
-   HC-light mang CẢ hai class (back-compat), nên phải loại nó ra khỏi nhánh dark. */
+/* `--vscode-foreground` is NOT brighter than body text — Dark+ is even darker (#CCCCCC vs
+   editor #D4D4D4), 2026-dark is nearly identical — so old bold only differed in weight and looked faint.
+   Push contrast in the theme's own direction, keeping the hue. VS Code puts this class on body;
+   HC-light carries BOTH classes (back-compat), so it must be excluded from the dark branch. */
 body.vscode-dark,body.vscode-high-contrast:not(.vscode-high-contrast-light){--strong:color-mix(in srgb,var(--vscode-editor-foreground),#fff 45%)}
 body.vscode-light,body.vscode-high-contrast-light{--strong:color-mix(in srgb,var(--vscode-editor-foreground),#000 45%)}
-/* Claude = terracotta. Đặt trên body để mọi chỗ dùng chung một biến. */
+/* Claude = terracotta. Set on body so everything shares one variable. */
 body[data-provider="claude"]{--accent:#d97757;--accent-soft:rgba(217,119,87,.13)}
 body[data-provider="planner"]{--accent:#8b7cf8;--accent-soft:rgba(139,124,248,.14)}
-/* Planner là daemon HTTP: nó tự chọn model, `POST /chat` không mang model/effort, và nén
-   context là khái niệm của CLI. Ba nút đó trên tab planner là nút chết — ẩn chứ đừng để
-   chúng khoe "auto" rồi mở QuickPick rỗng. */
+/* Planner is an HTTP daemon: it picks its own model, `POST /chat` carries no model/effort, and
+   compacting context is a CLI concept. Those three buttons are dead on a planner tab — hide them rather
+   than let them show "auto" and open an empty QuickPick. */
 body[data-provider="planner"] #model,body[data-provider="planner"] #effort,
 body[data-provider="planner"] #ctxwrap,
 body[data-provider="planner"] .quota{display:none}
 body{padding:0;margin:0;background:var(--vscode-sideBar-background,var(--vscode-editor-background));color:var(--vscode-editor-foreground);font:16px/1.55 var(--vscode-font-family);height:100vh;display:flex;flex-direction:column;-webkit-text-size-adjust:100%}
-/* Trên iOS `100vh` tính cả phần bị thanh địa chỉ che nên composer bị đẩy khỏi màn hình.
-   Qua @supports chứ không phải `height:var(--vh,100dvh)`: engine không hiểu `dvh` sẽ coi
-   declaration đó là invalid rồi rơi về `auto`, KHÔNG rơi lại `100vh`. Bàn phím mở thì JS
-   ghi inline height (visualViewport) — inline thắng cả hai. */
+/* On iOS `100vh` includes the part hidden by the address bar, so the composer is pushed off screen.
+   Via @supports rather than `height:var(--vh,100dvh)`: an engine that doesn't know `dvh` treats that
+   declaration as invalid and falls back to `auto`, NOT to `100vh`. With the keyboard open JS
+   writes an inline height (visualViewport) — inline beats both. */
 @supports (height:100dvh){body{height:100dvh}}
 header{background:var(--vscode-sideBar-background,var(--vscode-editor-background));padding:7px 12px;border-bottom:1px solid var(--vscode-panel-border);display:flex;justify-content:space-between;align-items:center;gap:8px}
 header .left,header .right{display:flex;align-items:center;gap:6px;min-width:0}
@@ -28,12 +28,12 @@ header .left,header .right{display:flex;align-items:center;gap:6px;min-width:0}
 .chip.ghost:hover{background:var(--accent-soft);color:var(--vscode-foreground)}
 #provider{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);font-weight:600;display:inline-flex;align-items:center;gap:5px}
 #provider.iconly{padding:4px 8px}
-/* Chip chỉ có một emoji: bớt padding cho khỏi to hơn chip chữ bên cạnh. */
+/* A chip holding only an emoji: less padding so it isn't bigger than the text chip beside it. */
 #history{padding:2px 8px;font-size:13px}
-/* Chip git. `#branch` là span chứ không phải button: nó chỉ để đọc, mọi thứ bấm được
-   trong header đều mở một QuickPick, và một nút không làm gì là lời hứa suông. */
+/* Git chip. `#branch` is a span, not a button: it is read-only, everything clickable
+   in the header opens a QuickPick, and a button that does nothing is an empty promise. */
 #branch,#scm{display:inline-flex;align-items:center;gap:5px;font-size:14px;padding:2px 9px}
-/* `display` của tác giả thắng UA stylesheet, nên `hidden` phải được nói lại ở đây. */
+/* An author `display` beats the UA stylesheet, so `hidden` has to be restated here. */
 #branch[hidden],#scm[hidden]{display:none}
 #scm .scmadd{color:var(--vscode-gitDecoration-addedResourceForeground,#3fb950)}
 #scm .scmdel{color:var(--vscode-gitDecoration-deletedResourceForeground,#f85149)}
@@ -49,19 +49,19 @@ button.older{display:block;margin:4px auto 12px}
 .empty{color:var(--vscode-descriptionForeground);text-align:center;margin-top:32px}
 .msg{max-width:100%;border-radius:7px;padding:6px 9px;word-break:break-word}
 .msg .meta{font-size:13px;text-transform:uppercase;letter-spacing:.5px;opacity:.55;margin-bottom:2px}
-/* Mọi khối phải bắt đầu ở CÙNG một mốc: main 12px + 11px = 23px, khớp với
-   tool/command (viền 2px + 9px) và .perm (viền 1px + 10px). .user có viền 1px nên
-   chỉ cần 10px, .assistant không có viền nên cần đủ 11px — trước đây nó là 0 và
-   chữ của agent thụt sang trái 11px so với mọi thứ khác. */
-/* User phải tách khỏi nền code cả khi mắt không phân biệt được màu: nền có chênh sáng,
-   còn vạch trái dày là dấu hiệu hình học cố định, không phụ thuộc hue của provider. */
+/* Every block must start at the SAME line: main 12px + 11px = 23px, matching
+   tool/command (2px border + 9px) and .perm (1px border + 10px). .user has a 1px border so
+   it only needs 10px, .assistant has no border so it needs the full 11px — it used to be 0 and
+   the agent's text sat 11px left of everything else. */
+/* User messages must stand apart from code even for eyes that can't tell colours: the background differs in lightness,
+   and the thick left bar is a fixed geometric cue that doesn't depend on the provider's hue. */
 .user{align-self:stretch;background:var(--vscode-input-background);background:color-mix(in srgb,var(--vscode-input-background) 78%,var(--vscode-editor-foreground) 22%);border:1px solid var(--vscode-panel-border);border-color:var(--vscode-contrastActiveBorder,var(--accent));border-radius:7px;padding-left:10px;box-shadow:inset 3px 0 0 var(--vscode-contrastActiveBorder,var(--accent))}
 .assistant{align-self:flex-start;background:transparent;padding-left:11px}
 .uimgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-/* Ảnh đính kèm bị dọn sau TTL — alt là tên file, để bản ghi cũ vẫn nói được đã gửi ảnh gì. */
+/* Attachments are cleaned up after a TTL — alt is the file name, so old transcripts still say which image was sent. */
 .uimg{max-width:180px;max-height:140px;border-radius:6px;background:var(--vscode-textCodeBlock-background);object-fit:contain}
 .assistant-image{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;border-radius:8px;background:var(--vscode-textCodeBlock-background);object-fit:contain}
-/* Tool/command là log, không phải hội thoại: viền mảnh, nền phẳng, chữ nhỏ hơn. */
+/* Tool/command rows are a log, not conversation: thin border, flat background, smaller text. */
 .tool,.command{align-self:stretch;background:transparent;border-left:2px solid var(--vscode-panel-border);border-radius:0;padding:2px 0 2px 9px}
 details>summary{display:flex;align-items:flex-start;gap:8px}
 details>summary::-webkit-details-marker{display:none}
@@ -72,8 +72,8 @@ details>summary::before{content:"▸";color:var(--accent);flex:none;line-height:
 pre.peek{opacity:.9;flex:1;min-width:0}
 pre.full{margin-top:2px}
 .assistant>pre.mono,.stream-done>pre.mono,.stream-tail>pre.mono,.md-quote>pre.mono{margin:.6em 0}
-/* markdown() sinh hai class này nhưng chưa bao giờ có rule: blockquote rơi về mặc định
-   trình duyệt (thụt 40px, không dấu hiệu gì), hr về viền 3D. */
+/* markdown() emits these two classes but they never had rules: blockquote fell back to the browser
+   default (40px indent, no marker), hr to a 3D border. */
 .md-quote{margin:.6em 0;padding-left:10px;border-left:2px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground)}
 .md-hr{margin:.9em 0;border:0;border-top:1px solid var(--vscode-panel-border)}
 .tool .meta,.command .meta{margin-bottom:1px}
@@ -82,24 +82,24 @@ pre.full{margin-top:2px}
 .warning{align-self:stretch;border-left:2px solid var(--vscode-editorWarning-foreground);border-radius:0;padding-left:9px}
 .error{align-self:stretch;border-left:2px solid var(--vscode-editorError-foreground);border-radius:0;padding-left:9px}
 .trow{display:flex;gap:6px;align-items:baseline;min-width:0}
-/* Lệnh dài nằm trong <details>; căn cho dòng có mũi tên và dòng không có thẳng hàng nhau. */
+/* Long commands sit inside <details>; align rows with and without the arrow. */
 details>summary>.trow{flex:1}
 .tool>.trow,.command>.trow{padding-left:17px}
 .morecount.bad{color:var(--vscode-editorError-foreground)}
-/* `flex:none` giữ base size = max-content, nên `word-break` của `.msg` không bao giờ được
-   dùng: một tên tool MCP (`mcp__plugin_playwright_playwright__browser_resize`) rộng 413px
-   đẩy scrollWidth của `main` lên 449 ở màn 390 — cả khung chat lệch ngang. Kẹp bằng
-   `max-width` chứ ĐỪNG cho co: `flex` co thì tham số (110 ký tự) luôn tạo thiếu chỗ và tên
-   ngắn cũng bị ngắt giữa chữ ("Bas/h"). */
+/* `flex:none` keeps the base size = max-content, so `.msg`'s `word-break` never
+   applies: an MCP tool name (`mcp__plugin_playwright_playwright__browser_resize`) 413px wide
+   pushes `main`'s scrollWidth to 449 on a 390 screen — the whole chat shifts sideways. Clamp with
+   `max-width` and DON'T let it shrink: with `flex` shrinking, the argument (110 chars) always runs out of room and short
+   names break mid-word ("Bas/h"). */
 .tname{color:var(--accent);font-weight:600;flex:none;max-width:100%}
 .targ,.tout{font-family:var(--vscode-editor-font-family,monospace);font-size:14.5px;color:var(--vscode-descriptionForeground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .tout{flex:1}
-/* Nhịp dọc: khoảng cách giữa các khối phải LỚN hơn khoảng cách giữa các dòng trong một
-   khối, nếu không mắt không thấy đoạn nào kết thúc. line-height ở đây là 1.55, nên gap
-   3px cũ (~12% một dòng) làm cả tin nhắn dính thành một mảng chữ. .6em ~ 10px. */
+/* Vertical rhythm: the gap between blocks must be LARGER than the gap between lines within a
+   block, or the eye can't see where a paragraph ends. line-height here is 1.55, so the old
+   3px gap (~12% of a line) glued a whole message into one wall of text. .6em ~ 10px. */
 .md-p{margin:.6em 0}
-/* Lề ngoài cùng do padding của .msg lo; khối đầu/cuối không được cộng thêm. Lúc stream,
-   khối đầu tiên nhìn thấy nằm trong .stream-tail khi .stream-done còn rỗng. */
+/* The outer margin comes from .msg's padding; first/last blocks must not add to it. While streaming,
+   the first visible block is inside .stream-tail while .stream-done is still empty. */
 .assistant>:first-child,.assistant>.stream-done>:first-child,
 .assistant>.stream-done:empty+.stream-tail>:first-child{margin-top:0}
 .assistant>:last-child,.assistant>.stream-tail>:last-child{margin-bottom:0}
@@ -108,8 +108,8 @@ details>summary>.trow{flex:1}
 .md-table{border-collapse:collapse;margin:.6em 0;font-size:14.5px;display:block;overflow-x:auto;max-width:100%}
 .md-table th,.md-table td{border:1px solid var(--vscode-panel-border);padding:3px 9px;text-align:left;vertical-align:top}
 .md-table th{font-weight:600;background:var(--vscode-textCodeBlock-background)}
-/* 2em = đúng mức thụt của extension Claude (`.root_ ol,ul{padding-inline-start:2em}`).
-   20px cũ hẹp hơn một ký tự bullet nên cấp lồng nhau gần như không nhìn ra. */
+/* 2em = the exact indent of the Claude extension (`.root_ ol,ul{padding-inline-start:2em}`).
+   The old 20px was narrower than one bullet character, so nested levels were barely visible. */
 .md-list{margin:.6em 0;padding-inline-start:2em}
 .md-list li{margin:.15em 0}
 .md-list .md-list{margin:.15em 0}
@@ -123,7 +123,7 @@ details summary{cursor:pointer;color:var(--vscode-descriptionForeground);font-si
 details summary:hover .morecount{color:var(--accent)}
 button.path{background:none;border:none;color:var(--vscode-textLink-foreground);cursor:pointer;font:inherit;padding:0;text-decoration:underline}
 footer{border-top:1px solid var(--vscode-panel-border);padding:8px 12px 10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
-/* Một khung duy nhất bọc attachment + ô nhập + toolbar, viền sáng lên khi focus. */
+/* One frame wraps attachments + input + toolbar, with a border that lights up on focus. */
 .composer-box{border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:10px;background:var(--vscode-input-background);padding:6px 8px 6px;transition:border-color .12s}
 .composer-box:focus-within{border-color:var(--accent)}
 #attachments{display:flex;flex-wrap:wrap;gap:5px;margin:2px 2px 6px}
@@ -138,11 +138,11 @@ textarea{display:block;width:100%;box-sizing:border-box;resize:none;min-height:4
 .composerbar{display:flex;align-items:center;gap:5px;margin-top:2px}
 #model,#effort{color:var(--accent);font-weight:600;border-color:var(--accent-soft)}
 #model:hover,#effort:hover{color:var(--accent)}
-/* Vòng quota: cung, chữ và màu đều là % CÒN LẠI — cùng chiều với vòng context. */
+/* Quota ring: arc, number and colour are all % LEFT — same direction as the context ring. */
 .quota{display:flex;align-items:center;gap:4px;color:var(--vscode-descriptionForeground);font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap;cursor:default}
 .quota[hidden]{display:none}
-/* Card neo vào .composerbar (không phải vòng) và canh phải: vòng 5h nằm giữa hàng, neo vào nó thì
-   panel hẹp đẩy card lọt ra mép trái. Hiện gần như ngay (60ms chỉ để lướt chuột qua không nháy). */
+/* The card anchors to .composerbar (not the ring) and aligns right: the 5h ring sits mid-row, and anchoring to it
+   lets a narrow panel push the card past the left edge. Appears almost at once (60ms only so a passing mouse doesn't flash it). */
 .composerbar{position:relative}
 .qtip{position:absolute;right:0;bottom:calc(100% + 10px);z-index:20;width:260px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:10px 12px 11px;
   background:var(--vscode-editorHoverWidget-background,var(--vscode-editor-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));
@@ -163,9 +163,9 @@ textarea{display:block;width:100%;box-sizing:border-box;resize:none;min-height:4
 .qtip .qt-row+.qt-row{margin-top:3px}
 .qt-foot{margin-top:8px;padding-top:7px;border-top:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);font-size:11.5px}
 .qtip{text-align:left;cursor:default}
-/* Chạm vòng context là compact luôn; iOS giữ :hover sau cú chạm nên card sẽ treo lại — ẩn trên cảm ứng. */
+/* Tapping the context ring compacts right away; iOS keeps :hover after a tap so the card would stick — hide on touch. */
 @media (hover:none){#ctxwrap .qtip{display:none}}
-/* Chip cache nằm bên trái hàng: card canh theo mép trái composer thay vì mép phải. */
+/* The cache chip is at the left of the row: the card aligns to the composer's left edge instead of its right. */
 #cachewrap .qtip{right:auto;left:0}
 .qt-sec{margin-top:9px;padding-top:8px;border-top:1px solid var(--vscode-panel-border)}
 .qt-sec .qt-foot{border-top:none;padding-top:0;margin-top:6px}
@@ -177,7 +177,7 @@ textarea{display:block;width:100%;box-sizing:border-box;resize:none;min-height:4
 #ctxwrap:hover{border-color:var(--accent);color:var(--vscode-foreground)}
 button#send{width:26px;height:26px;flex:none;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:17px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
 button#send:disabled{opacity:.35;cursor:default}
-/* Dòng "đang nghĩ": logo hãng xoay + động từ đổi + đồng hồ. Ngừng xoay = đã dừng. */
+/* The "thinking" line: spinning logo + changing verb + timer. Stopped spinning = halted. */
 .perm{align-self:stretch;border:1px solid var(--accent);border-radius:8px;padding:8px 10px;background:var(--accent-soft)}
 .perm .ptitle{font-weight:600;color:var(--accent);margin-bottom:4px}
 .perm pre{font-family:var(--vscode-editor-font-family,monospace);font-size:14.5px;background:var(--vscode-textCodeBlock-background);padding:5px 7px;border-radius:4px;margin:4px 0}
@@ -197,7 +197,7 @@ button#send:disabled{opacity:.35;cursor:default}
 .perm .deny{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
 .perm.answered{opacity:.55}
 .perm.answered .pacts{display:none}
-/* .pacts biến mất nhưng nút chọn của AskUserQuestion thì không — chặn bấm lần hai. */
+/* .pacts disappears but AskUserQuestion's option buttons don't — block a second click. */
 .perm.answered .qopt{pointer-events:none}
 .perm .phint{color:var(--vscode-descriptionForeground);font-size:13.5px;margin:2px 0}
 #thinking{display:flex;align-items:center;gap:8px;padding:0 4px 8px;font-size:15px;color:var(--accent)}
@@ -207,16 +207,16 @@ button#send:disabled{opacity:.35;cursor:default}
 @keyframes spin{to{transform:rotate(360deg)}}
 #thinkword{font-weight:600;flex:none}
 #thinktime{color:var(--vscode-descriptionForeground);font-variant-numeric:tabular-nums;flex:none}
-/* Xong lượt: cùng thanh đó đổi vai thành footer tổng kết — hết xoay, hết màu accent. */
+/* Turn done: the same bar becomes the summary footer — no spin, no accent colour. */
 #thinking.done{color:var(--vscode-descriptionForeground)}
 #thinking.done #spinner{animation:none;opacity:.65}
-/* Dòng tổng kết dài hơn bề ngang điện thoại thì cắt, đừng đẩy nút Stop ra ngoài. */
+/* A summary line wider than the phone is cut off; don't push the Stop button out. */
 #thinktokens{color:var(--vscode-descriptionForeground);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #thinking button{margin-left:auto;background:transparent;border:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);border-radius:999px;padding:1px 10px;font:inherit;font-size:14px;cursor:pointer}
 #thinking button:hover{border-color:var(--accent);color:var(--accent)}
 @media (prefers-reduced-motion:reduce){#spinner{animation:none}}
 
-/* Hàng chờ: tin đã gõ nhưng lượt hiện tại chưa xong. Host là nguồn sự thật. */
+/* Queue: messages typed while the current turn is still running. The host is the source of truth. */
 #queue{display:flex;flex-direction:column;gap:3px}
 #queue:not(:empty){padding:4px 0 2px}
 .qitem{display:flex;align-items:flex-start;gap:6px;font-size:12px;line-height:1.35;
@@ -226,24 +226,24 @@ button#send:disabled{opacity:.35;cursor:default}
 .qitem button{background:none;border:0;color:inherit;cursor:pointer;padding:0 2px;opacity:.6;font-size:13px}
 .qitem button:hover{opacity:1;color:var(--vscode-errorForeground)}
 
-/* ---------- Cảm ứng / bề ngang hẹp (vscode.dev trên điện thoại) ---------- */
-/* Hai trục khác nhau: cỡ nút theo LOẠI con trỏ, còn layout theo BỀ RỘNG panel (media query
-   trong webview đo iframe, nên một pane hẹp trên desktop cũng vào nhánh dưới — đúng ý). */
-/* Dán ảnh là đường chính trên desktop; nút chọn file chỉ mọc ra khi không có con trỏ thật
-   (iOS không phát `paste` kèm file), để composerbar trên desktop không thêm nút. */
+/* ---------- Touch / narrow width (vscode.dev on a phone) ---------- */
+/* Two separate axes: button size follows the POINTER type, layout follows the panel WIDTH (media queries
+   in a webview measure the iframe, so a narrow pane on desktop takes the branch below too — intended). */
+/* Pasting images is the main path on desktop; the file-picker button only appears without a real pointer
+   (iOS fires no `paste` with a file), so the desktop composerbar gets no extra button. */
 #attach{display:none}
 @media (hover:none){
   #attach{display:inline-block}
-  /* Không có con trỏ thật thì :hover dính lại sau khi bấm — trả về trạng thái thường. */
+  /* Without a real pointer :hover sticks after a tap — reset to the normal state. */
   .chip:hover{background:var(--vscode-button-secondaryBackground)}
   .chip.ghost:hover{background:transparent;color:var(--vscode-descriptionForeground)}
   #ctxwrap:hover{border-color:transparent;color:var(--vscode-descriptionForeground)}
   #attachments .attx:hover{opacity:.7}
   #attachments .att.open:hover{background:transparent}
-  /* `!important` vì rule gốc cũng dùng — nó ở đó để thắng style button VS Code chèn vào. */
+  /* `!important` because the base rule uses it too — it's there to beat the button style VS Code injects. */
   .qopt:hover{border-color:var(--vscode-panel-border)!important}
   button,.chip,.att,summary{-webkit-tap-highlight-color:transparent}
-  /* Ngón tay cần ~44px; 22px của chip là cỡ dành cho chuột. */
+  /* A finger needs ~44px; the chip's 22px is mouse sizing. */
   .chip{padding:7px 12px}
   button#send{width:38px;height:38px}
   #ctxwrap{padding:7px 10px 7px 4px}
@@ -252,44 +252,44 @@ button#send:disabled{opacity:.35;cursor:default}
 }
 @media (max-width:560px){
   header{padding:6px 8px;gap:6px}
-  /* Header là MỘT hàng không wrap và mọi chip đều co được: ở 390px hàng này chỉ dư 3px,
-     nên thiếu một pixel là cả sáu chip cùng bị ellipsis — kể cả chip một ký tự ("‹.."),
-     tức mất luôn cái nhìn ra nó là nút gì. Crumb là chỗ DUY NHẤT được co. */
+  /* The header is ONE non-wrapping row and every chip can shrink: at 390px the row has 3px to spare,
+     so one pixel short and all six chips get ellipsis — even the one-character chip ("‹.."),
+     which loses any hint of what button it is. The crumb is the ONLY thing allowed to shrink. */
   header .left{flex:1 1 auto}
   header .right{flex:none}
   header .chip{flex:none}
   #crumb{flex:1 1 auto;min-width:0;max-width:none}
-  /* Ở 390px hàng header chỉ dư 3px (xem ghi chú trên): không có chỗ cho chip git, và co
-     nó lại thì chip khác bị ellipsis. Ẩn hẳn — số liệu git là thứ bỏ được, nút thì không. */
+  /* At 390px the header row has only 3px to spare (see the note above): no room for the git chip, and
+     shrinking it ellipsizes other chips. Hide it — git numbers are expendable, buttons are not. */
   #branch,#scm{display:none}
-  /* Selector id nên nó không nhận padding cảm ứng của `.chip` — chip đồng hồ cao 26px giữa
-     hàng 36px, và vùng chạm hụt gần một nửa. */
+  /* An id selector, so it doesn't get `.chip`'s touch padding — the clock chip is 26px tall in a
+     36px row, and nearly half the tap area misses. */
   #history{padding:6px 9px;font-size:14px}
   main{padding:8px;gap:8px}
-  /* MỘT hàng ở 390px: chỉ vừa nếu tên model được co và effort rút còn 3 ký tự (chat.js).
-     `min-width:0` là điều kiện bắt buộc — flex item mặc định `min-width:auto` nên chip
-     `gpt-5.6-luna` sẽ đẩy cả hàng rộng hơn khung thay vì tự cắt. Mọi chip khác giữ nguyên
-     bề rộng: co chúng là mất luôn dấu hiệu nút đó là gì. Số token vẫn nằm trong tooltip. */
+  /* ONE row at 390px: it only fits if the model name shrinks and effort is cut to 3 characters (chat.js).
+     `min-width:0` is mandatory — a flex item defaults to `min-width:auto`, so a chip like
+     `gpt-5.6-luna` would widen the row past the frame instead of truncating. Every other chip keeps its
+     width: shrinking them loses the cue for what the button is. Token counts stay in the tooltip. */
   .composerbar{gap:4px}
-  /* `.chip` có `overflow:hidden` nên `min-width:auto` của flex item rơi về 0 — không chốt
-     `flex:none` thì cả hàng cùng bị bóp, kể cả chip một ký tự. */
+  /* `.chip` has `overflow:hidden`, so a flex item's `min-width:auto` drops to 0 — without
+     `flex:none` the whole row gets squeezed, one-character chips included. */
   .composerbar>*{flex:none}
   .composerbar .spacer{flex:1 1 auto}
   #model{flex:0 1 auto;min-width:0}
   #model,#effort{font-size:13px;padding:5px 8px}
-  /* Trên điện thoại % context là số ít giá trị nhất trong ba vòng — bỏ nó (vòng vẫn còn,
-     nó là nút compact) để lấy chỗ cho % của hai vòng limit, thứ không có chỗ nào khác báo. */
+  /* On a phone the context % is the least valuable of the three rings — drop it (the ring stays,
+     it's the compact button) to make room for the two limit rings' %, which nothing else reports. */
   #q5lab,#q7lab,#ctxtext,#ctxtokens{display:none}
   #cachelab{display:none}
   .chip{padding:6px 9px;font-size:14px}
-  /* Cụm ba vòng là thứ chật nhất ở 390px: khoảng hở và cỡ số nhỏ hơn hàng chip, vì % chỉ
-     cần đọc được chứ không phải bấm được. */
+  /* The three-ring cluster is the tightest thing at 390px: smaller gap and number size than the chip row, because the %
+     only needs to be readable, not tappable. */
   .quota{gap:2px;font-size:12.5px}
   #ctxwrap{padding:5px 2px}
-  /* Chỉ `min-height` — ĐỪNG đặt `height` ở đây. 0.29.18 đặt `height:34px` để ô rỗng khỏi cao
-     ba dòng, nhưng `grow()` tính ra 73px (nó đo `rows="3"`) nên mỗi event visualViewport lại
-     nới ô lên 73px; giữa lúc iOS trồi bàn phím thì đúng một lần relayout đó đủ để WebKit hủy
-     present. Giờ `grow()` đo nội dung và chạy sẵn lúc boot, nên min-height là cỡ nghỉ. */
+  /* `min-height` only — DON'T set `height` here. 0.29.18 set `height:34px` so the empty box wasn't three
+     lines tall, but `grow()` computed 73px (it measured `rows="3"`) so every visualViewport event
+     widened the box to 73px; while iOS raised the keyboard, that one relayout was enough for WebKit to drop the
+     present. Now `grow()` measures content and runs at boot, so min-height is the resting size. */
   textarea{min-height:32px;line-height:1.4}
   .composer-box{padding:5px 7px}
   footer{padding-top:6px}

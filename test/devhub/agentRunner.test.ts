@@ -4,10 +4,10 @@ const os=require('node:os');const path=require('node:path');
 
 test('Makefile status output maps to running state',()=>{
   assert.deepEqual(parseStatus('running (pid=123)'),{running:true,detail:'running (pid=123)'});
-  assert.equal(parseStatus('not running').running,false,'"not running" chứa chữ running — không được nhầm');
+  assert.equal(parseStatus('not running').running,false,'"not running" contains the word running — must not be confused');
   assert.equal(parseStatus('').running,false);
-  assert.equal(parseStatus('Not Running').running,false,'không phân biệt hoa thường');
-  assert.equal(parseStatus('running (pid=1)\nextra\nlines').detail.includes('\n'),false,'chỉ lấy dòng đầu');
+  assert.equal(parseStatus('Not Running').running,false,'case-insensitive');
+  assert.equal(parseStatus('running (pid=1)\nextra\nlines').detail.includes('\n'),false,'first line only');
 });
 
 test('agent config is validated and ~ expanded',()=>{
@@ -15,7 +15,7 @@ test('agent config is validated and ~ expanded',()=>{
   assert.equal(a.length,1);
   assert.equal(a[0].cwd,os.homedir()+'/x');
   assert.deepEqual(normalizeAgents(undefined),[]);
-  assert.equal(expandHome('/abs/path'),'/abs/path','đường dẫn tuyệt đối giữ nguyên');
+  assert.equal(expandHome('/abs/path'),'/abs/path','absolute paths are kept as is');
 });
 
 test('the documented db path is kept, not silently replaced by the first .db in cwd',()=>{

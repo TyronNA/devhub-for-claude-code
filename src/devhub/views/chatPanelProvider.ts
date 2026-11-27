@@ -18,20 +18,20 @@ import { providerLabel } from '../ui/format';
 import { GitStatusWatcher } from '../workspace/gitStatusWatcher';
 
 interface Draft {workspace:DevHubWorkspace;project:DevHubProject;provider:ProviderId;}
-/** Một tab = một webview panel. Draft tab đổi key thành session key ngay khi lượt đầu chạy. */
+/** One tab = one webview panel. A draft tab switches its key to the session key as soon as the first turn runs. */
 interface QueuedPrompt {text:string;images?:string[];}
 interface Tab {key:string;panel:any;session?:DevHubSession;draft?:Draft;workspace?:DevHubWorkspace;project?:DevHubProject;batcher:EventBatcher<any>;model?:string;effort?:string;disposed:boolean;
-  /** Tin nhắn gõ trong lúc lượt đang chạy. Host giữ danh sách, webview chỉ hiển thị. */
+  /** Messages typed while a turn is running. The host keeps the list; the webview only displays it. */
   queue:QueuedPrompt[];starting?:boolean;flushing?:boolean;}
 
 const ATTACHMENT_TTL_MS=48*60*60*1000;
 const PRUNE_EVERY_MS=6*60*60*1000;
 const PERM_TIMEOUT_MS=5*60*1000;
-// Mở tab / bấm chip là chấp nhận bản git mới hơn 2s; đừng chạy lại git cho mỗi cú bấm.
+// Opening a tab / clicking the chip accepts a git result up to 2s old; don't rerun git on every click.
 const HOT_SCM_MS=2000;
-// Câu hỏi chặn cả lượt và phải chờ người thật; 5 phút của duyệt-tool là quá ngắn.
+// A question blocks the whole turn and must wait for a real person; the 5 minutes of a tool approval is too short.
 const ASK_TIMEOUT_MS=60*60*1000;
-// Effort là cờ CLI cố định nên giữ trong code; danh sách MODEL nằm ở settings vì nó đổi liên tục.
+// Effort is a fixed CLI flag so it stays in code; the MODEL list lives in settings because it keeps changing.
 const EFFORTS:Record<string,string[]>={claude:['low','medium','high','xhigh','max']};
 function cfg(){return vscode.workspace.getConfiguration('devHub');}
 function modelChoices(provider:string):string[]{const v=cfg().get(`${provider}.models`,[]);return Array.isArray(v)?v.filter((x:any)=>typeof x==='string'):[];}
@@ -39,47 +39,47 @@ function defaultsFor(provider:string){return {model:cfg().get(`${provider}.model
 const EXT:Record<string,string>={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp'};
 
 /**
- * Lựa chọn model/effort của một provider. Export vì server mobile cũng dựng đúng danh sách
- * này — hai chỗ tự tính là hai chỗ lệch nhau.
+ * A provider's model/effort choices. Exported because the mobile server builds this exact list
+ * too — two places computing it themselves are two places that drift apart.
  */
 export function optionChoices(provider:string,kind:'model'|'effort',model?:string):Array<{label:string;description?:string;value:string}>{
   const list=kind==='model'?modelChoices(provider):(EFFORTS[provider]||[]);
   return list.map((v:string)=>({label:v,value:v}));
 }
 /**
- * Ảnh đính kèm chỉ được nằm trong thư mục Dev Hub tự ghi ra. `attachments` là đường dẫn do
- * client gửi lên và đi thẳng vào prompt (nối vào prompt của Claude), nên một
- * client hỏng có thể trỏ vào file bất kỳ. Trả về đường dẫn xấu đầu tiên, undefined nếu sạch.
+ * Attached images may only live in the folder Dev Hub writes itself. `attachments` are paths
+ * sent up by the client that go straight into the prompt (appended to Claude's prompt), so a
+ * broken client could point at any file. Returns the first bad path, undefined if clean.
  */
 export function foreignAttachment(paths:string[]|undefined,dir:string):string|undefined{
   const root=nodePath.resolve(dir)+nodePath.sep;
   return (paths||[]).find(p=>!nodePath.resolve(String(p)).startsWith(root));
 }
-/** Mốc thời gian trong QuickPick lịch sử; giờ cụ thể đã nằm ở `detail`. */
+/** Time label in the history QuickPick; the exact time is already in `detail`. */
 function ago(at:number){const m=Math.round((Date.now()-at)/60000);
   if(m<1)return 'just now'; if(m<60)return `${m}m ago`;
   const h=Math.round(m/60); return h<24?`${h}h ago`:`${Math.round(h/24)}d ago`;}
-/** Session không thuộc project nào (planner) thì tiêu đề tab lấy khúc đầu của title. */
+/** A session that belongs to no project (planner) takes the start of its title as the tab title. */
 export function shortTabTitle(title:string|undefined){
   const head=String(title||'').split(' \u00b7 ')[0].trim();
   return head?(head.length>24?head.slice(0,23)+'\u2026':head):undefined;
 }
-/** Model/effort mặc định lấy từ settings; mobile mở session mới cũng phải khớp panel. */
+/** Default model/effort come from settings; a new session opened from mobile must match the panel too. */
 export function defaultTurnOptions(provider:string){return defaultsFor(provider);}
 
 export class ChatPanelProvider {
   private tabs=new Map<string,Tab>();
   private active?:Tab;
   private buffers=new SessionEventCache<DevHubEvent>(12,1500);
-  /** key -> số event đầu buffer đến từ `loadTranscript`; xem `mergeTranscript`. */
+  /** key -> number of events at the start of the buffer that came from `loadTranscript`; see `mergeTranscript`. */
   private historyLen=new Map<string,number>();
   private disposers:Array<()=>void>=[];
   private lastSelected?:DevHubSession;
-  /** requestId -> huỷ hẹn giờ. CLI chặn cho tới khi có control_response, nên mọi
-   *  đường thoát (đóng tab, hết hạn, dispose) đều phải trả lời DENY. */
+  /** requestId -> cancel timer. The CLI blocks until a control_response, so every
+   *  exit path (tab close, expiry, dispose) must answer DENY. */
   private pendingPerms=new Map<string,{provider:string;sessionId:string;timer:any;input?:any;req:any}>();
-  /** Cột của nhóm editor chứa Dev Hub. Ghim lại để tab thứ 2 trở đi nằm cạnh tab cũ
-   *  thay vì `Beside` tự tách split mới mỗi lần. */
+  /** The column of the editor group holding Dev Hub. Pinned so the 2nd tab onwards sits next to the old one
+   *  instead of `Beside` opening a new split every time. */
   private column?:number;
 
   constructor(
@@ -103,7 +103,7 @@ export class ChatPanelProvider {
       manager.on('sessionAdded',()=>this.onSessionChanged()),
     );
     void this.pruneAttachments();
-    // Quét một lần lúc dựng là TTL 48h không bao giờ được thi hành trên cửa sổ mở cả tuần.
+    // Sweeping only once at construction means the 48h TTL is never enforced in a window left open all week.
     this.pruneTimer=setInterval(()=>void this.pruneAttachments(),PRUNE_EVERY_MS);
     this.pruneTimer.unref?.();
   }
@@ -113,8 +113,8 @@ export class ChatPanelProvider {
     for(const d of this.disposers)d();for(const t of this.tabs.values()){t.batcher.dispose();t.panel?.dispose();}this.tabs.clear();}
 
   /**
-   * Webview panel bị huỷ khi Reload Window. Serializer nhận lại panel VS Code dựng sẵn
-   * kèm state webview đã `setState`, rồi gắn lại vào một Tab như chưa có gì xảy ra.
+   * Webview panels are destroyed on Reload Window. The serializer receives the panel VS Code rebuilt
+   * along with the webview state saved via `setState`, and re-attaches it to a Tab as if nothing happened.
    */
   registerSerializer(context:any){
     const api=vscode.window.registerWebviewPanelSerializer?.('devHub.chat',{
@@ -123,7 +123,7 @@ export class ChatPanelProvider {
     if(api)context.subscriptions.push(api);
   }
   private async adopt(panel:any,state:any){
-    // Reload/đóng tab có thể huỷ panel giữa hai await của serializer; panel chết thì bỏ hydrate.
+    // A reload/tab close can destroy the panel between two awaits of the serializer; if the panel is dead, skip hydrating.
     let disposed=false;const watch=panel.onDidDispose?.(()=>{disposed=true;});
     try{
       const provider=state?.provider,id=state?.nativeSessionId;
@@ -147,8 +147,8 @@ export class ChatPanelProvider {
   }
 
   /**
-   * Tab chưa gửi tin nào không có session để tra; nó chỉ là workspace+project+provider.
-   * Không dựng lại thì Reload Window vứt cả tab lẫn chữ đang gõ trong đó.
+   * A tab that hasn't sent anything has no session to look up; it is only workspace+project+provider.
+   * Without rebuilding it, Reload Window throws away the tab and the text being typed in it.
    */
   private async adoptDraft(panel:any,state:any,isDisposed:()=>boolean=()=>false){
     const d=state?.draft;
@@ -172,7 +172,7 @@ export class ChatPanelProvider {
     this.refreshScm(tab);
   }
 
-  // ---------- mở / tạo tab ----------
+  // ---------- open / create tab ----------
   async restoreSelection(session:DevHubSession){
     if(this.tabs.size)return;
     await this.openSession(session);
@@ -216,12 +216,12 @@ export class ChatPanelProvider {
         if(tab.disposed)return;
         const merged=mergeTranscript(loaded,this.buffers.get(key)||[],reread?this.historyLen.get(key)||0:0,session.provider!=='planner');
         events=this.buffers.set(key,merged.events);
-        // `set()` cắt từ ĐẦU khi quá hạn, nên tiền tố lịch sử co lại đúng số event bị cắt.
+        // `set()` trims from the START when over the limit, so the history prefix shrinks by exactly the number of events trimmed.
         this.historyLen.set(key,Math.max(0,merged.historyLen-(merged.events.length-events.length)));
       }catch(e:any){
         if(tab.disposed)return;
-        // Đọc lại hỏng thì giữ nguyên buffer: một lần gọi daemon lỗi không được xoá trắng tab
-        // đang có nội dung, cũng không được đánh dấu session unavailable.
+        // If the re-read fails keep the buffer: one failed daemon call must not blank a tab
+        // that has content, nor mark the session unavailable.
         events=reread?this.buffers.get(key)??[]:[];
         if(!reread&&session.status!=='running'){tab.session=await this.manager.markUnavailable(session);if(tab.disposed)return;}
         this.post(tab,{type:'error',message:`Transcript unavailable: ${e?.message||e}`});
@@ -235,8 +235,8 @@ export class ChatPanelProvider {
     await this.restoreLostQueue(tab);
   }
 
-  /** Mọi đường gửi `sessionSelected` phải qua đây: bỏ `forWebview` là ảnh mất `imageSrcs`
-   *  và webview không có gì để vẽ. */
+  /** Every path that sends `sessionSelected` must go through here: skipping `forWebview` drops `imageSrcs`
+   *  and the webview has nothing to draw. */
   private postSessionSelected(tab:Tab,session:DevHubSession,events:any[]){
     this.post(tab,{type:'sessionSelected',session,events:events.map((e:any)=>this.forWebview(tab,e)),
       workspace:tab.workspace,project:tab.project});
@@ -250,13 +250,13 @@ export class ChatPanelProvider {
     this.column=panel.viewColumn??(typeof column==='number'?column:this.column);
     return this.attach(key,panel,init);
   }
-  /** Ảnh người dùng đính kèm và media agent nhắc tới (`localMediaRoots`). */
+  /** Images the user attached and media the agent mentions (`localMediaRoots`). */
   private imageRoots(){return [this.attachmentDir(),...localMediaRoots()].map(p=>vscode.Uri.file(p));}
-  /** Webview không tự gọi được `asWebviewUri`; đưa nó gốc `/` để tự nối đường dẫn tuyệt đối vào. */
+  /** The webview can't call `asWebviewUri` itself; give it the `/` base so it can join absolute paths onto it. */
   private postMediaBase(tab:Tab){try{this.post(tab,{type:'mediaBase',base:String(tab.panel.webview.asWebviewUri(vscode.Uri.file('/'))).replace(/\/$/,'')});}catch{}}
   private attach(key:string,panel:any,init:Partial<Tab>):Tab{
     const tab:Tab={key,panel,batcher:undefined as any,queue:[],disposed:false,...init};
-    // Panel khôi phục sau reload mang option cũ; gán lại trước khi ghi html.
+    // A panel restored after reload carries old options; reassign them before writing html.
     if(panel.webview)panel.webview.options={enableScripts:true,localResourceRoots:this.imageRoots()};
     tab.batcher=new EventBatcher<any>(items=>this.post(tab,{type:'eventBatch',items:coalesceSessionDeltas(items)}),40);
     panel.webview.html=this.html(panel.webview);
@@ -269,7 +269,7 @@ export class ChatPanelProvider {
   private focus(tab:Tab){this.active=tab;tab.panel.reveal(this.column??vscode.ViewColumn.Beside,false);}
   private retitle(tab:Tab){
     tab.panel.title=tab.project?.name??shortTabTitle(tab.session?.title)??'Dev Hub';
-    // Logo lên tab thay cho tiền tố "Claude ·".
+    // The logo goes on the tab instead of a "Claude ·" prefix.
     if(this.providerOf(tab)==='planner'){tab.panel.iconPath=new vscode.ThemeIcon('robot');return;}
     if(this.mediaRoot){
       const base='claude';
@@ -278,11 +278,11 @@ export class ChatPanelProvider {
     }
   }
 
-  // ---------- message từ webview ----------
+  // ---------- messages from the webview ----------
   private async handleMessage(tab:Tab,raw:any){
     try{
       const m=parseWebviewMessage(raw); if(!m){
-        if(raw?.type==='pasteImage')this.post(tab,{type:'attachmentError',requestId:raw.requestId,message:'Ảnh không hợp lệ hoặc vượt giới hạn 9 MiB.'});
+        if(raw?.type==='pasteImage')this.post(tab,{type:'attachmentError',requestId:raw.requestId,message:'Invalid image or over the 9 MiB limit.'});
         return;
       }
       if(m.type==='ready'){this.retitle(tab);this.postMediaBase(tab);
@@ -290,10 +290,10 @@ export class ChatPanelProvider {
         this.postOptions(tab);this.postQueue(tab);this.refreshScm(tab);return;}
       if(m.type==='dequeue'){const i=Number(m.index);
         if(Number.isInteger(i)&&i>=0&&i<tab.queue.length){tab.queue.splice(i,1);this.postQueue(tab);}return;}
-      // "Back" của một app điện thoại: mở lại sidebar kèm cây session. `<viewId>.focus` là
-      // command VS Code tự đăng ký cho mọi view được contribute. Chỉ chạy khi người dùng bấm —
-      // KHÔNG có chiều ngược lại: tự đóng sidebar thì bấm mở nó lại là bị đóng ngay, ngáo.
-      // Bố cục là của người dùng; extension chỉ đi khi được bấm.
+      // The "Back" of a phone app: reopen the sidebar with the session tree. `<viewId>.focus` is
+      // a command VS Code registers for every contributed view. Only runs when the user clicks —
+      // there is NO reverse direction: auto-closing the sidebar would close it again right after you open it, which is silly.
+      // The layout belongs to the user; the extension only moves when clicked.
       if(m.type==='newTab'){await this.openPickerChat(tab);return;}
       if(m.type==='pickProvider'){await this.changeProvider(tab);return;}
       if(m.type==='pickProject'){await this.changeProject(tab);return;}
@@ -307,15 +307,15 @@ export class ChatPanelProvider {
         this.settlePerm(m.requestId,m.allow,m.answers); void id; return;}
       if(m.type==='pasteImage'){
         try{await this.saveAttachment(tab,m.mime,m.data,m.requestId);}
-        catch{this.post(tab,{type:'attachmentError',requestId:m.requestId,message:'Không lưu được ảnh. Hãy chọn lại ảnh.'});}
+        catch{this.post(tab,{type:'attachmentError',requestId:m.requestId,message:'Could not save the image. Please pick it again.'});}
         return;
       }
       if(m.type==='cancel'&&tab.session){
         await this.manager.cancel(tab.session.provider,tab.session.nativeSessionId);return;}
       if(m.type==='compact'){await this.compact(tab);return;}
       if(m.type==='copySessionId'){
-        // Planner: ID trong store được scope theo daemon, thứ trace được là conversation gốc —
-        // giống hệt devhub.copySessionId trên cây.
+        // Planner: the store ID is scoped per daemon; what can be traced is the original conversation —
+        // exactly like devhub.copySessionId in the tree.
         const s=tab.session; if(!s)return;
         await vscode.env.clipboard.writeText(s.provider==='planner'?plannerConversationId(s.nativeSessionId):s.nativeSessionId);
         vscode.window.setStatusBarMessage('Dev Hub session ID copied',1500);return;}
@@ -326,30 +326,30 @@ export class ChatPanelProvider {
         const images=m.attachments;
         const foreign=foreignAttachment(images,this.attachmentDir());
         if(foreign){this.fail(tab,`Refused an attachment outside the Dev Hub attachment folder: ${foreign}`);return;}
-        // Chỉ đính ảnh, không gõ chữ, là một tin hợp lệ — trước đây nó bị bỏ im lặng ở đây
-        // trong khi webview đã xoá chip ảnh, nên tấm ảnh biến mất không một lời nào.
+        // Attaching only an image, with no text, is a valid message — it used to be dropped silently here
+        // while the webview had already cleared the image chip, so the image vanished without a word.
         if(!text&&!images?.length)return;
         if(tab.session){
-          // Lượt đang chạy: xếp hàng thay vì bỏ im. Flush khi status rời 'running'.
+          // A turn is running: queue instead of dropping silently. Flush when the status leaves 'running'.
           if(tab.session.status==='running'||this.manager.isBusy(tab.session.provider,tab.session.nativeSessionId)){
             tab.queue.push({text,images});this.postQueue(tab);return;}
-          // Lượt đã rảnh mà hàng chờ còn tin (lần gửi trước hỏng): resume lỗi KHÔNG phát
-          // `sessionUpdated` nên không có gì gọi scheduleFlush. Coi `queue.length` là lý do
-          // để xếp tiếp thì tab thành chỉ-ghi. Xếp tin mới vào cuối rồi lấy đầu hàng ra chạy.
+          // The turn is idle but the queue still has messages (the previous send failed): a failed resume does NOT emit
+          // `sessionUpdated`, so nothing calls scheduleFlush. Treating `queue.length` as a reason
+          // to keep queuing makes the tab write-only. Queue the new message at the end, then run the head of the queue.
           let head:QueuedPrompt={text,images};
           if(tab.queue.length){tab.queue.push(head);head=tab.queue.shift()!;this.postQueue(tab);}
-          // Webview đã xoá ô nhập và chip ảnh lúc gửi; gửi hỏng mà không trả tin vào hàng
-          // chờ là mất luôn chữ đã gõ. Hai nhánh kia (flushQueue, start) đã làm đúng thế.
+          // The webview cleared the input and image chips on send; a failed send that doesn't put the message back in the
+          // queue loses the typed text. The other two branches (flushQueue, start) already do exactly that.
           try{
             tab.session=await this.manager.resume(tab.session,head.text,{model:tab.model,effort:tab.effort,images:head.images});
           }catch(e){tab.queue.unshift(head);this.postQueue(tab);throw e;}
           this.lastSelected=tab.session;this.onSelection(tab.session);
           await this.pushSession(tab);
         }else if(tab.draft){
-          // Enter hai lần trước khi session kịp sinh ra sẽ tạo hai session.
+          // Pressing Enter twice before the session exists would create two sessions.
           if(tab.starting){tab.queue.push({text,images});this.postQueue(tab);return;}
-          // Lần start trước hỏng thì hàng chờ còn tin cũ và chưa có session nào để flush vào.
-          // Gửi thẳng tin mới là đảo thứ tự — xếp nó vào cuối rồi lấy đầu hàng ra chạy.
+          // If the previous start failed, the queue still holds the old message and there is no session to flush into yet.
+          // Sending the new message directly would reorder them — queue it at the end, then run the head of the queue.
           let head:QueuedPrompt={text,images};
           if(tab.queue.length){tab.queue.push(head);head=tab.queue.shift()!;this.postQueue(tab);}
           tab.starting=true;
@@ -370,7 +370,7 @@ export class ChatPanelProvider {
   }
 
   /**
-   * Claude nén bằng slash command thật của CLI; planner là daemon HTTP, không có khái niệm nén.
+   * Claude compacts with the CLI's real slash command; the planner is an HTTP daemon with no notion of compaction.
    */
   private async compact(tab:Tab){
     const session=tab.session;
@@ -384,7 +384,7 @@ export class ChatPanelProvider {
     this.post(tab,{type:'error',message:`${providerLabel(session.provider)} sessions have no compaction.`});
   }
 
-  /** `showTextDocument` mở PNG ra thành ký tự rác; ảnh phải đi qua `vscode.open`. */
+  /** `showTextDocument` opens a PNG as garbage characters; images must go through `vscode.open`. */
   private async openPath(p:string){
     const uri=vscode.Uri.file(p);
     if(Object.values(EXT).includes(nodePath.extname(p).slice(1).toLowerCase()))
@@ -393,26 +393,26 @@ export class ChatPanelProvider {
   }
 
   /**
-   * Lỗi cũng là bản ghi. `post({type:'error'})` chỉ vẽ một dòng rồi thôi — lần vẽ lại kế
-   * tiếp lấy event từ buffer của host, và dòng đó không có ở đó. Đúng lúc cần soi lại thì
-   * không còn gì để soi. Tab chưa có session (draft) thì đành gửi suông.
+   * Errors are records too. `post({type:'error'})` only draws one line and that's it — the next redraw
+   * takes events from the host's buffer, where that line doesn't exist. Right when you need to look back
+   * there is nothing to look at. A tab without a session yet (draft) can only send it bare.
    */
   private fail(tab:Tab,message:string){
     if(tab.session)this.emitLocal(tab,{type:'error',message,timestamp:Date.now()});
     else this.post(tab,{type:'error',message});
   }
-  /** Sự kiện do chính panel sinh ra: vào buffer trước, nếu không nó chết ở lần vẽ lại. */
+  /** Events produced by the panel itself: buffer them first, or they die on the next redraw. */
   private emitLocal(tab:Tab,event:DevHubEvent){
     const id=tab.session?.nativeSessionId; if(!id)return;
     this.buffers.append(this.sessionKey(this.providerOf(tab),id),event);
     this.post(tab,{type:'event',sessionId:id,event:this.forWebview(tab,event)});
   }
   /**
-   * Event do bên ngoài đẩy vào, không thuộc lượt nào (reminder của planner tự nổ).
+   * An event pushed in from outside that belongs to no turn (a planner reminder firing by itself).
    *
-   * Chỉ append khi buffer đã có: append vào key rỗng sẽ tạo một buffer chỉ có event này, và
-   * lần mở tab sau thấy buffer không rỗng nên bỏ luôn `loadTranscript` — tab chỉ còn một dòng
-   * reminder, mất sạch lịch sử. Không có buffer thì cứ để daemon kể lại (`/conversations`).
+   * Only append when a buffer exists: appending to an empty key creates a buffer holding only this event, and
+   * the next tab open sees a non-empty buffer and skips `loadTranscript` — the tab is left with a single
+   * reminder line and loses all history. Without a buffer let the daemon tell it again (`/conversations`).
    */
   injectEvent(provider:ProviderId,nativeSessionId:string,event:DevHubEvent){
     const key=this.sessionKey(provider,nativeSessionId);
@@ -431,14 +431,14 @@ export class ChatPanelProvider {
     let value=pick.value;
     if(value==='__custom__'){value=await vscode.window.showInputBox({prompt:`${kind} value`,value:tab[kind]});if(value===undefined)return;value=value.trim()||undefined;}
     tab[kind]=value;
-    // Lựa chọn thuộc về session, không phải tab: đóng tab mở lại vẫn phải là model vừa chọn.
+    // The choice belongs to the session, not the tab: closing and reopening the tab must keep the model just picked.
     if(tab.session)tab.session=await this.manager.setTurnOptions(tab.session,{model:tab.model,effort:tab.effort});
-    // Qua postOptions: post trần thiếu `slash`, và webview đọc `!!x.slash` nên nút `/` biến mất.
+    // Via postOptions: a bare post lacks `slash`, and the webview reads `!!x.slash`, so the `/` button would disappear.
     this.postOptions(tab);
   }
   private rekeyTab(tab:Tab,next:string){if(tab.key===next)return;this.tabs.delete(tab.key);tab.key=next;this.tabs.set(next,tab);}
 
-  /** Đổi provider/project trên một session đã chạy thì mở draft mới — không sửa lịch sử session cũ. */
+  /** Changing provider/project on a session that already ran opens a new draft — the old session's history isn't edited. */
   private async changeProvider(tab:Tab){
     const pick=await vscode.window.showQuickPick([{label:'Claude',id:'claude'}],{placeHolder:'Provider'});
     if(!pick)return;
@@ -453,8 +453,8 @@ export class ChatPanelProvider {
     await this.newChat(target.workspace,target.project,provider);
   }
   /**
-   * Nút `+` = chat mới NGAY trong project đang mở, không hỏi lại project — bắt chọn lại
-   * mỗi lần thì đang chat dở không mở thêm được. Đổi project vẫn ở chip breadcrumb.
+   * The `+` button = a new chat RIGHT IN the open project, without asking for the project again — having to re-pick
+   * every time would make it impossible to open another chat mid-conversation. Changing project is still the breadcrumb chip.
    */
   private async openPickerChat(tab:Tab){
     const provider=this.providerOf(tab);
@@ -462,8 +462,8 @@ export class ChatPanelProvider {
     const target=await this.pickProject(); if(!target)return;
     await this.newChat(target.workspace,target.project,provider);
   }
-  /** QuickPick có sẵn filter -> đây cũng là ô "search project nhanh". */
-  /** Danh sách slash command do chính CLI khai trong `system init` — không hardcode. */
+  /** QuickPick has a built-in filter -> this doubles as the "quick project search" box. */
+  /** The slash command list the CLI itself declares in `system init` — not hardcoded. */
   private async pickSlash(tab:Tab){
     const provider=this.providerOf(tab);
     const adapter:any=this.providers[provider];
@@ -477,14 +477,14 @@ export class ChatPanelProvider {
     this.post(tab,{type:'insertText',text:'/'+pick.cmd+' '});
   }
   /**
-   * Lịch sử của project đang mở. Quét lại trước khi liệt kê: session mở từ terminal không đi
-   * qua Dev Hub, store chỉ mới tới lần refresh gần nhất (lúc sidebar hiện ra).
+   * History of the open project. Rescan before listing: sessions opened from a terminal don't go
+   * through Dev Hub, and the store is only as fresh as the last refresh (when the sidebar appeared).
    */
   private async pickHistory(tab:Tab){
     try{await this.refreshHistory();}catch{}
     const project=tab.project;
     const all=(await this.listSessions()).slice().sort((a,b)=>b.updatedAt-a.updatedAt);
-    // Session planner không thuộc project nào; ở tab đó lọc theo projectId sẽ ra rỗng.
+    // Planner sessions belong to no project; on that tab filtering by projectId would come back empty.
     const list=project?all.filter(s=>s.projectId===project.id):all;
     if(!list.length){vscode.window.showInformationMessage(`Dev Hub: no earlier session${project?` in ${project.name}`:''} yet.`);return;}
     const items=list.slice(0,200).map(s=>({label:s.title||'(untitled)',
@@ -503,14 +503,14 @@ export class ChatPanelProvider {
     return workspace?{workspace,project:pick.project}:undefined;
   }
 
-  // ---------- ảnh dán ----------
+  // ---------- pasted images ----------
   private attachmentDir(){return nodePath.join(this.storageDir||require('node:os').tmpdir(),'devhub','attachments');}
   private async saveAttachment(tab:Tab,mime:string,b64:string,requestId?:string){
     const dir=this.attachmentDir();
     await fsp.mkdir(dir,{recursive:true});
     const file=nodePath.join(dir,`${Date.now()}-${crypto.randomUUID().slice(0,8)}.${EXT[mime]||'png'}`);
     await fsp.writeFile(file,Buffer.from(b64,'base64'));
-    // Đường dẫn quay lại webview, rồi đi kèm sendPrompt.attachments.
+    // The path goes back to the webview, then travels with sendPrompt.attachments.
     this.post(tab,{type:'attachment',path:file,...(requestId?{requestId}:{})});
   }
   private async pruneAttachments(){
@@ -524,12 +524,12 @@ export class ChatPanelProvider {
   }
 
   /**
-   * Ảnh đi trong event dưới dạng ĐƯỜNG DẪN, không phải 1,7MB base64: cache của host và
-   * `state.events` của webview giữ chuỗi ngắn. Chỉ tới lúc gửi mới đổi sang webview URI, vì
-   * chỉ host mới gọi được `asWebviewUri` (và mỗi tab một origin khác nhau).
+   * Images travel in events as PATHS, not 1.7MB of base64: the host cache and
+   * the webview's `state.events` keep short strings. Only when sending are they turned into webview URIs, because
+   * only the host can call `asWebviewUri` (and each tab has its own origin).
    */
   private forWebview(tab:Tab,event:any){
-    // data URI không có file để đổi URI.
+    // A data URI has no file to turn into a URI.
     const uri=(p:string)=>p.startsWith('data:')?p:String(tab.panel.webview.asWebviewUri(vscode.Uri.file(p)));
     try{
       if(event?.type==='assistant_image'&&event.path)return {...event,src:uri(event.path)};
@@ -538,18 +538,18 @@ export class ChatPanelProvider {
     return event;
   }
 
-  // ---------- sự kiện từ manager ----------
+  // ---------- events from the manager ----------
   private tabsFor(provider:string,sessionId:string){const t=this.tabs.get(this.sessionKey(provider,sessionId));return t?[t]:[];}
   private onEvent(x:any){
     const key=this.sessionKey(x.provider,x.sessionId);
-    // Chỉ báo nhất thời: vào buffer thì vài chục event/lượt sẽ đẩy transcript ra khỏi cache
-    // và hiện lại khi mở lại session, dù nó chẳng còn nghĩa gì lúc đó.
+    // Only a transient signal: buffering it, a few dozen events per turn would push the transcript out of the cache
+    // and show up again when the session is reopened, though it means nothing by then.
     if(x.event.type==='thinking'){
       for(const tab of this.tabsFor(x.provider,x.sessionId))this.post(tab,{type:'event',sessionId:x.sessionId,event:x.event});
       return;
     }
     this.buffers.append(key,x.event,(previous,next)=>previous?.type==='assistant_delta'&&next?.type==='assistant_delta'?{...next,text:previous.text+next.text}
-      // View frame sau CHỨA cả frame trước; giữ cả hai là nhân bản một câu trả lời 30 lần trong cache.
+      // A later view frame CONTAINS the previous one; keeping both duplicates one answer 30 times in the cache.
       :previous?.type==='assistant_view'&&next?.type==='assistant_view'?next:undefined);
     for(const tab of this.tabsFor(x.provider,x.sessionId)){
       if(x.event.type==='assistant_delta')tab.batcher.push({sessionId:x.sessionId,event:x.event});
@@ -564,7 +564,7 @@ export class ChatPanelProvider {
     const id=tab.session?.nativeSessionId;
     if(id)void this.queueStore().save(this.sessionKey(this.providerOf(tab),id),tab.queue);
   }
-  /** Chữ người dùng đã gõ ở cửa sổ trước: trả lại để đọc/chép, KHÔNG tự gửi. */
+  /** Text the user typed in a previous window: handed back to read/copy, NOT auto-sent. */
   private async restoreLostQueue(tab:Tab){
     const id=tab.session?.nativeSessionId; if(!id)return;
     const items=await this.queueStore().take(this.sessionKey(this.providerOf(tab),id));
@@ -574,8 +574,8 @@ export class ChatPanelProvider {
         items.map(i=>'\u00b7 '+(i.text||`${i.images?.length??0} image(s)`)).join('\n')});
   }
   /**
-   * `SessionManager.consume` xoá session khỏi `active` trong `finally`, tức SAU khi phát
-   * `sessionUpdated`. Gửi ngay trong handler sẽ đụng `claim()` và bị từ chối, nên phải hoãn.
+   * `SessionManager.consume` removes the session from `active` in its `finally`, i.e. AFTER emitting
+   * `sessionUpdated`. Sending right inside the handler hits `claim()` and gets refused, so it must be deferred.
    */
   private scheduleFlush(tab:Tab){
     if(!tab.queue.length||tab.flushing)return;
@@ -586,9 +586,9 @@ export class ChatPanelProvider {
   private async flushQueue(tab:Tab){
     const session=tab.session;
     if(!session||session.status==='running'||!tab.queue.length)return;
-    if(!this.tabs.get(tab.key))return;   // tab đã đóng trong lúc chờ
-    // Stop phát 'cancelled' trước khi stream drain xong; gửi vào đó chỉ tổ ăn
-    // "already running a turn" rồi in lỗi lên khung chat. `sessionUpdated` cuối sẽ gọi lại.
+    if(!this.tabs.get(tab.key))return;   // the tab was closed while waiting
+    // Stop emits 'cancelled' before the stream finishes draining; sending into that only earns
+    // "already running a turn" and prints an error in the chat. The final `sessionUpdated` will call again.
     if(this.manager.isBusy(session.provider,session.nativeSessionId))return;
     const next=tab.queue.shift()!;
     this.postQueue(tab);
@@ -596,13 +596,13 @@ export class ChatPanelProvider {
       tab.session=await this.manager.resume(session,next.text,{model:tab.model,effort:tab.effort,images:next.images});
       this.lastSelected=tab.session;this.onSelection(tab.session);
     }catch(e:any){
-      // Gửi lại thất bại: trả tin về đầu hàng chờ để không mất chữ người dùng đã gõ.
+      // Resend failed: put the message back at the head of the queue so the user's typed text isn't lost.
       tab.queue.unshift(next);this.postQueue(tab);
       this.fail(tab,e?.message||String(e));
     }
   }
-  // Stop chỉ giết lượt đang chạy: hàng chờ sống tiếp và `sessionUpdated` ('cancelled') sẽ
-  // flush nó — bấm Stop rồi gõ tin mới là cách đổi hướng, không phải cách bỏ tin đã gõ.
+  // Stop only kills the running turn: the queue lives on and `sessionUpdated` ('cancelled') will
+  // flush it — pressing Stop then typing a new message is how you change direction, not how you discard what you typed.
   private onSessionUpdated(s:DevHubSession){
     if(s.status!=='running')this.closePerms(s.provider,s.nativeSessionId,'the turn ended');
     for(const tab of this.tabsFor(s.provider,s.nativeSessionId)){tab.session=s;this.post(tab,{type:'sessionUpdated',session:s});
@@ -619,15 +619,15 @@ export class ChatPanelProvider {
     this.onSessionChanged();
   }
 
-  /** Luôn gửi SAU sessionSelected/draftSelected — hai cái đó thay nguyên state ở webview. */
+  /** Always send AFTER sessionSelected/draftSelected — those two replace the whole webview state. */
   private postOptions(tab:Tab){
     const provider=this.providerOf(tab);
     const adapter:any=this.providers[provider];
-    // Provider không có slash command (planner) — ẩn nút thay vì báo lỗi mỗi lần bấm.
+    // A provider without slash commands (planner) — hide the button instead of reporting an error on every click.
     const slash=(adapter?.slashCommands?.(tab.session?.nativeSessionId)||[]).length>0;
     this.post(tab,{type:'optionsChanged',model:tab.model,effort:tab.effort,provider,slash});}
-  /** Yêu cầu duyệt quyền từ CLI -> đúng tab của session đó. */
-  /** `false` = không có tab nào nhận, request đã bị deny — người gọi đừng mời "Open" nữa. */
+  /** A permission request from the CLI -> the tab of that exact session. */
+  /** `false` = no tab took it and the request was denied — the caller shouldn't offer "Open" any more. */
   showPermission(provider:string,sessionId:string,req:any):boolean{
     const tab=this.tabs.get(this.sessionKey(provider,sessionId));
     if(!tab){this.answerPermission(provider,sessionId,req.requestId,false);
@@ -642,47 +642,47 @@ export class ChatPanelProvider {
     this.post(tab,{type:'permission',request:req});
     return true;
   }
-  /** Trả lời đúng MỘT lần cho mỗi requestId. */
+  /** Answer exactly ONCE per requestId. */
   private settlePerm(requestId:string,allow:boolean,answers?:Record<string,string>,expired?:boolean){
     const p=this.pendingPerms.get(requestId); if(!p)return;
     clearTimeout(p.timer); this.pendingPerms.delete(requestId);
     if(expired)this.noteDenied(p.provider,p.sessionId,`${p.req?.displayName||p.req?.toolName||'A tool'} request expired without an answer and was denied.`);
-    // AskUserQuestion trả lời bằng cách allow kèm `answers` nhét lại vào input.
+    // AskUserQuestion is answered by allowing with `answers` put back into the input.
     const updatedInput=answers?{...(p.input||{}),answers}:undefined;
     this.answerPermission(p.provider,p.sessionId,requestId,allow,updatedInput);
     this.permissionObserver?.();
   }
   /**
-   * Tree vẽ icon "chờ duyệt" bằng cách hỏi `isAwaitingPermission`, nên nó phải được đánh
-   * thức ở CẢ hai đầu: lúc câu hỏi hiện ra và lúc nó được trả lời. Setter chứ không phải
-   * tham số constructor — cái đó đã 10 tham số, và đây là cùng lối wiring của
-   * `setPermissionSink`/`setSlashStore`. KHÔNG dùng `onSessionChanged`: cái đó là refresh
-   * đầy đủ, còn câu hỏi duyệt đến dày hơn nhiều và không đổi gì ở ports/tasks.
+   * The tree draws the "awaiting approval" icon by asking `isAwaitingPermission`, so it must be woken
+   * at BOTH ends: when the question appears and when it is answered. A setter rather than a
+   * constructor parameter — that already has 10 parameters, and this is the same wiring style as
+   * `setPermissionSink`/`setSlashStore`. NOT `onSessionChanged`: that is a full refresh,
+   * while approval questions come far more often and change nothing in ports/tasks.
    */
   private permissionObserver?:()=>void;
   setPermissionObserver(fn:()=>void){this.permissionObserver=fn;}
-  /** Session này có request duyệt đang treo? Trạng thái SỐNG — một câu hỏi chưa trả lời
-   *  không phải lịch sử của session, nên nó không đi vào store. */
+  /** Does this session have a pending approval request? LIVE state — an unanswered question
+   *  isn't part of the session's history, so it doesn't go into the store. */
   isAwaitingPermission(provider:string,sessionId:string){
     for(const [,p] of this.pendingPerms)if(p.provider===provider&&p.sessionId===sessionId)return true;
     return false;
   }
-  /** Thẻ duyệt/câu hỏi chỉ sống trong DOM webview, mà `sessionSelected` xoá sạch DOM —
-   *  không gửi lại thì CLI cứ chặn với một câu hỏi vô hình. */
+  /** Approval/question cards only live in the webview DOM, and `sessionSelected` wipes the DOM —
+   *  without resending, the CLI keeps blocking on an invisible question. */
   private replayPerms(tab:Tab){
     const id=tab.session?.nativeSessionId; if(!id)return;
     const provider=this.providerOf(tab);
     for(const [,p] of this.pendingPerms)
       if(p.provider===provider&&p.sessionId===id&&p.req)this.post(tab,{type:'permission',request:p.req});
   }
-  /** Thẻ đã chết vẫn nằm trên DOM: khoá lại kèm lý do, không thì người dùng bấm vào
-   *  chỗ không còn ai nghe (`proc.write` trả false lặng lẽ khi process đã đi). */
+  /** A dead card is still in the DOM: lock it with the reason, or the user clicks into
+   *  something nobody is listening to (`proc.write` quietly returns false once the process is gone). */
   private closeCard(p:{provider:string;sessionId:string},requestId:string,note:string){
     for(const tab of this.tabsFor(p.provider,p.sessionId))this.post(tab,{type:'permissionClosed',requestId,note});
   }
-  /** CLI chặn cả lượt để chờ duyệt, nên lượt đã rời 'running' = mọi request còn treo là đồ
-   *  chết. Không dọn thì `replayPerms` dựng lại nó mãi và timer bắn warning "expired" vào
-   *  một session xong từ lâu. Vẫn deny để giữ bất biến "CLI luôn có câu trả lời". */
+  /** The CLI blocks the whole turn while waiting for approval, so a turn that left 'running' = every pending request is
+   *  dead. Without cleanup `replayPerms` keeps rebuilding them and the timer fires "expired" warnings into
+   *  a session that finished long ago. Still deny, to keep the invariant "the CLI always gets an answer". */
   private closePerms(provider:string,sessionId:string,note:string){
     for(const [id,p] of [...this.pendingPerms]){
       if(p.provider!==provider||p.sessionId!==sessionId)continue;
@@ -690,8 +690,8 @@ export class ChatPanelProvider {
       this.settlePerm(id,false);
     }
   }
-  /** Deny ngầm trông y như tool im lặng không chạy; phải để lại dấu vết. Đi qua `onEvent`
-   *  để warning vào cả buffer, khỏi biến mất khi transcript được nạp lại. */
+  /** A silent deny looks just like a tool that quietly never ran; it must leave a trace. Goes through `onEvent`
+   *  so the warning lands in the buffer too and doesn't vanish when the transcript is reloaded. */
   private noteDenied(provider:string,sessionId:string,message:string){
     const event={type:'warning',message,timestamp:Date.now()} as DevHubEvent;
     if(this.tabsFor(provider,sessionId).length)this.onEvent({provider,sessionId,event});
@@ -702,8 +702,8 @@ export class ChatPanelProvider {
       if(p.provider===provider&&(!sessionId||p.sessionId===sessionId))this.settlePerm(id,false);
   }
   /**
-   * Chip git trên header. Đọc git chỉ khi có tab đang HIỆN trỏ vào repo đó; tab ẩn
-   * (`retainContextWhenHidden`) vẫn còn DOM nhưng không ai nhìn, chạy git cho nó là đốt CPU.
+   * The git chip in the header. Git is read only when a VISIBLE tab points at that repo; a hidden tab
+   * (`retainContextWhenHidden`) still has its DOM but nobody is looking, so running git for it burns CPU.
    */
   private git?:GitStatusWatcher;
   setGitWatcher(watcher:GitStatusWatcher){
@@ -715,13 +715,13 @@ export class ChatPanelProvider {
       for(const t of this.tabs.values())if(t.project?.gitRoot===root)this.post(t,{type:'scm',status});
     }));
   }
-  /** Gửi bản đang có ngay (khỏi chớp) rồi mới đọc lại; `status` vắng = ẩn chip. */
+  /** Send what we have right away (no flicker), then re-read; a missing `status` = hide the chip. */
   private refreshScm(tab:Tab){
     const root=tab.project?.gitRoot;
     this.post(tab,{type:'scm',status:root?this.git?.get(root):undefined});
     if(root&&this.git)void this.git.refresh(root,HOT_SCM_MS);
   }
-  /** Danh sách file bẩn lấy từ git, không lấy từ DOM — webview chỉ vẽ con số. */
+  /** The dirty file list comes from git, not from the DOM — the webview only draws the numbers. */
   private async pickChanged(tab:Tab){
     const root=tab.project?.gitRoot; if(!root||!this.git)return;
     await this.git.refresh(root,HOT_SCM_MS);
@@ -736,7 +736,7 @@ export class ChatPanelProvider {
     if(pick)await this.openPath((pick as any).file);
   }
   private post(tab:Tab,message:any){
-    // Webview chết thì getter/postMessage có thể ném đồng bộ, không chỉ trả false.
+    // When the webview is dead the getter/postMessage may throw synchronously, not just return false.
     if(tab.disposed)return;
     try{tab.panel?.webview?.postMessage(message);}catch(e:any){
       if(tab.disposed||/webview is disposed/i.test(String(e?.message||e))){tab.disposed=true;return;}
@@ -748,21 +748,21 @@ export class ChatPanelProvider {
   private html(webview:any){
     const nonce=crypto.randomBytes(16).toString('hex');
     const {css,script}=webviewAssets();
-    // Ảnh trên đĩa nạp qua nguồn của chính webview; thiếu nó thì đừng nhét `undefined`
-    // vào CSP, chỉ còn data: là đường lùi.
+    // Images on disk load through the webview's own source; without it don't put `undefined`
+    // into the CSP, leaving data: as the only fallback.
     const imgSrc=typeof webview?.cspSource==='string'?webview.cspSource:'';
     return `<!doctype html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${imgSrc} data:; media-src ${imgSrc}; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body>${chatBodyMarkup()}<script nonce="${nonce}">${script}</script></body></html>`;
   }
 }
 
 /**
- * CSP là `default-src 'none'`, và `localResourceRoots` chỉ mở các gốc media (ảnh
- * đính kèm, `~` và tmp cho media agent nhắc tới) —
- * css/js vẫn phải do host đọc rồi nhúng thẳng vào HTML. Đường dẫn tính từ `__dirname`
- * (`dist/src/devhub/views` -> gốc extension) nên đúng cả từ repo và trong .vsix.
+ * CSP is `default-src 'none'`, and `localResourceRoots` only opens the media roots (attached
+ * images, `~` and tmp for media the agent mentions) —
+ * css/js still have to be read by the host and inlined into the HTML. Paths are computed from `__dirname`
+ * (`dist/src/devhub/views` -> the extension root) so they are right both from the repo and inside the .vsix.
  */
-/** Thân trang chat. Dùng chung cho webview panel và cho server mobile — hai transport,
- *  một bộ id: `chat.js` tra cứu chúng bằng getElementById, lệch một id là chết lặng. */
+/** The chat page body. Shared by the webview panel and the mobile server — two transports,
+ *  one set of ids: `chat.js` looks them up with getElementById, and one mismatched id fails silently. */
 export function chatBodyMarkup(){return `<header><div class="left"><button id="provider" class="chip" title="Change provider">Dev Hub</button><button id="crumb" class="chip ghost" title="Search project">—</button><span id="branch" class="chip ghost" hidden></span><button id="scm" class="chip ghost" title="Uncommitted changes" hidden></button></div><div class="right"><button id="copyid" class="chip ghost" title="Copy session ID" hidden>ID</button><button id="history" class="chip ghost" title="Open an earlier session in this project">\u{1F553}</button><span id="status"></span><button id="newtab" class="chip ghost" title="New chat in this project">+</button></div></header><main id="messages"><div class="empty">Select a session or start a new Claude chat.</div></main><footer><div id="thinking" hidden><span id="spinner"></span><span id="thinkword">Cooking</span><span id="thinktime"></span><span id="thinktokens"></span><button id="cancel" title="Stop this turn">Stop</button></div><div class="composer-box"><div id="queue"></div><div id="attachments"></div><textarea id="input" rows="3" placeholder="Ask Claude…"></textarea><div class="composerbar"><button id="attach" class="chip ghost" title="Attach an image">\u{1F4CE}</button><input id="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden><button id="slash" class="chip ghost" title="Slash command">/</button><button id="model" class="chip ghost" title="Model">auto</button><button id="effort" class="chip ghost" title="Thinking effort">auto</button><span id="cachewrap" class="quota" hidden><span id="cachelab" class="qlab">cache</span><span id="cachetext"></span><span id="cachetip" class="qtip" role="tooltip"></span></span><span class="spacer"></span><span id="q5wrap" class="quota" hidden><svg width="18" height="18" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="q5arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="q5lab" class="qlab"></span><span id="q5text"></span><span id="q5tip" class="qtip" role="tooltip"></span></span><span id="q7wrap" class="quota" hidden><svg width="18" height="18" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="q7arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="q7lab" class="qlab"></span><span id="q7text"></span><span id="q7tip" class="qtip" role="tooltip"></span></span><button id="ctxwrap" title="Context left \u2014 click to compact"><svg id="donut" width="22" height="22" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="ctxtext">—</span><span id="ctxtokens"></span><span id="ctxtip" class="qtip" role="tooltip"></span></span><button id="send" title="Send (⏎)">↑</button></div></div></footer>`;}
 let assetCache:{css:string;script:string}|undefined;
 export function webviewAssets(){

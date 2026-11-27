@@ -3,9 +3,9 @@ import { VersionDrift, checkVersionDrift, updateCommandFor } from '../providers/
 import { ProcessRunner } from '../providers/processRunner';
 
 /**
- * Cảnh báo nhẹ khi CLI cài qua npm tụt lại phía sau registry — bản cài kiểu npm global
- * không tự update được, và chạy qua Dev Hub thì banner "update available" của CLI bị nuốt
- * vì transport là stream-json chứ không phải terminal. Ẩn hoàn toàn khi không lệch.
+ * A gentle warning when an npm-installed CLI falls behind the registry — a global npm install
+ * can't update itself, and when run through Dev Hub the CLI's "update available" banner is swallowed
+ * because the transport is stream-json, not a terminal. Fully hidden when versions match.
  */
 export class CliUpdateStatus {
   private item:any;private drifts:VersionDrift[]=[];

@@ -6,8 +6,8 @@ export function projectForCwd(projects:any[], cwd:string){
   const ck=pathKey(cwd); let best:any, bestLen=-1;
   for(const p of projects){
     const pk=pathKey(p.rootPath);
-    // Repo con nằm trong repo cha: `find` trả cái nào đứng trước trong mảng, tức thứ tự
-    // đăng ký quyết định session thuộc về ai. Khớp dài nhất mới là chủ thật của cwd.
+    // A child repo inside a parent repo: `find` returns whichever comes first in the array, so the
+    // registration order would decide who owns the session. The longest match is the true owner of the cwd.
     if((ck===pk||ck.startsWith(pk+path.sep))&&pk.length>bestLen){best=p;bestLen=pk.length;}
   }
   return best;
@@ -15,9 +15,9 @@ export function projectForCwd(projects:any[], cwd:string){
 export function timestampOf(v:any, fallback:number){ const raw=v?.timestamp ?? v?.created_at ?? v?.createdAt; if(typeof raw==='number') return raw>1e12?raw:raw*1000; const parsed=raw?Date.parse(raw):NaN; return Number.isFinite(parsed)?parsed:fallback; }
 export function truncateTitle(s:string){ return s.replace(/\s+/g,' ').trim().slice(0,80) || 'Untitled chat'; }
 /**
- * `from:'end'` đọc ĐUÔI file: transcript vượt maxBytes thì phần mới nhất mới là phần
- * cần hiển thị, đọc từ đầu sẽ mất hẳn hội thoại gần đây. Byte đầu của cửa sổ đuôi rơi
- * giữa một dòng JSON nên phải bỏ tới newline đầu tiên.
+ * `from:'end'` reads the file's TAIL: when a transcript exceeds maxBytes the newest part is the part
+ * to show, and reading from the start would lose the recent conversation entirely. The first byte of the tail window lands
+ * mid JSON line, so skip to the first newline.
  */
 export async function readJsonLines(file:string, maxBytes=2*1024*1024, from:'start'|'end'='start'):Promise<any[]> {
   const fh=await fs.open(file,'r');
@@ -46,14 +46,14 @@ export async function mapLimit<T,R>(items:T[], limit:number, fn:(item:T,index:nu
 
 export interface FileStamp { mtimeMs:number; size:number; }
 
-/** stat rẻ hơn nhiều so với open+read 64KB; dùng nó làm cửa vào cache. */
+/** stat is much cheaper than open+read 64KB; use it as the cache gate. */
 export async function stampOf(file:string):Promise<FileStamp|undefined>{
   try{ const st=await fs.stat(file); return {mtimeMs:st.mtimeMs,size:st.size}; }catch{ return undefined; }
 }
 
 /**
- * LRU theo insertion-order của Map. Giữ *dữ kiện đã parse* của từng file, không giữ
- * DevHubSession — project mapping phải tính lại mỗi lần vì danh sách project có thể đổi.
+ * LRU by the Map's insertion order. Keeps the *parsed facts* of each file, not a
+ * DevHubSession — project mapping must be recomputed every time because the project list can change.
  */
 export class HistoryScanCache<T> {
   private m=new Map<string,{stamp:FileStamp;value:T|undefined}>();
@@ -71,7 +71,7 @@ export class HistoryScanCache<T> {
   get size(){ return this.m.size; }
 }
 
-/** Map có chặn kích thước, cho transcriptIndex khỏi phình vô hạn. */
+/** A size-capped Map, so transcriptIndex can't grow without bound. */
 export function boundedSet(m:Map<string,string>,key:string,value:string,max=4000){
   if(m.has(key)) m.delete(key);
   m.set(key,value);

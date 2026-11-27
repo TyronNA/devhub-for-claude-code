@@ -4,13 +4,13 @@ import { ClaudeEventParser, extractClaudeSessionId } from './claudeEventParser';
 
 export interface PermissionRequest {
   requestId:string; toolName:string; displayName?:string; description?:string; input:any;
-  /** CLI đánh dấu request phải có người trả lời (AskUserQuestion) — hạn chờ khác hẳn duyệt tool. */
+  /** The CLI flags requests that need a human to answer (AskUserQuestion) — a very different wait from a tool approval. */
   requiresUserInteraction?:boolean;
 }
 export type PermissionDecision={behavior:'allow';updatedInput?:any}|{behavior:'deny';message?:string};
 export interface SessionOptions { model?:string; effort?:string; permissionMode?:string; appendSystemPrompt?:string; autoCompact?:string; strictMcpConfig?:boolean; artifacts?:boolean; promptCacheTtl?:'5m'|'1h'; }
 
-/** `rate_limit_event` chỉ có ở chế độ stream-json hai chiều — thay hẳn cho việc gọi `/usage`. */
+/** `rate_limit_event` only exists in two-way stream-json mode — it fully replaces calling `/usage`. */
 export function quotaFromRateLimit(info:any,now=Date.now()):UsageSnapshot{
   const w=info?.unifiedWindows; if(!w)return {};
   const out:UsageSnapshot={};
@@ -19,22 +19,22 @@ export function quotaFromRateLimit(info:any,now=Date.now()):UsageSnapshot{
     if(!win||typeof win.utilization!=='number')return;
     out[pct]=Math.round(win.utilization*1000)/10;   // 0.02 -> 2
     out[obs]=now; out[auth]=true;
-    if(typeof win.resetsAt==='number')out[at]=win.resetsAt*1000;  // epoch giây -> ms
+    if(typeof win.resetsAt==='number')out[at]=win.resetsAt*1000;  // epoch seconds -> ms
   };
   put(w.five_hour,'quota5hUsedPercentage','quota5hResetsAt','quota5hObservedAt','quota5hAuthoritative');
   put(w.seven_day,'quota7dUsedPercentage','quota7dResetsAt','quota7dObservedAt','quota7dAuthoritative');
-  // `unifiedWindows` là TOÀN BỘ trạng thái account ("windows absent from the account state are
-  // absent here"): window vắng = account không có/đã reset. Mọi chỗ merge usage đều spread, nên
-  // phải ghi `null` — bỏ trống thì 7d=100% của acc cũ dính mãi trên session đã đổi acc.
+  // `unifiedWindows` is the ENTIRE account state ("windows absent from the account state are
+  // absent here"): a missing window = the account doesn't have it / it was reset. Every usage merge spreads, so
+  // `null` must be written — leaving it out makes the old account's 7d=100% stick forever on a session that switched accounts.
   if(Object.keys(out).length)for(const k of ['5h','7d'])if(out[`quota${k}ObservedAt`]===undefined)
     Object.assign(out,{[`quota${k}UsedPercentage`]:null,[`quota${k}ResetsAt`]:null,[`quota${k}Authoritative`]:null,[`quota${k}ObservedAt`]:now});
   return out;
 }
 
 /**
- * `get_usage` (control request của CLI, SDK gọi là `usage_EXPERIMENTAL_…`): phần `behaviors` là
- * đặc điểm usage 24h/7d mà extension chính thức vẽ thành "N% of your usage was while 4+ sessions
- * ran in parallel". Chỉ giữ thứ card cần — payload đủ còn kèm cả danh sách slash command.
+ * `get_usage` (a CLI control request, the SDK calls it `usage_EXPERIMENTAL_…`): its `behaviors` are the
+ * 24h/7d usage traits the official extension draws as "N% of your usage was while 4+ sessions
+ * ran in parallel". Only keep what the card needs — the full payload also carries the slash command list.
  */
 export function insightsFromUsage(resp:any,now=Date.now()):UsageInsights|undefined{
   const b=resp?.behaviors; if(!b||typeof b!=='object')return undefined;
@@ -50,7 +50,7 @@ export function insightsFromUsage(resp:any,now=Date.now()):UsageInsights|undefin
   const day=win(b.day),week=win(b.week);
   return day||week?{observedAt:now,day,week}:undefined;
 }
-/** Số liệu của cả tài khoản, không của session: mọi tab dùng chung một nhịp hỏi. */
+/** Account-wide numbers, not per session: every tab shares one polling rhythm. */
 const INSIGHTS_EVERY_MS=5*60_000;
 let insightsAskedAt=0;
 export function resetInsightsThrottle(){insightsAskedAt=0;}
@@ -58,8 +58,8 @@ export function resetInsightsThrottle(){insightsAskedAt=0;}
 type Sink=(e:DevHubEvent)=>void;
 
 /**
- * Một process `claude` sống suốt phiên. Lượt sau đẩy JSON qua stdin thay vì spawn lại
- * (~1,2s mỗi lượt), và nhờ đó gắn được `--permission-prompt-tool stdio`.
+ * One `claude` process lives for the whole session. Later turns push JSON over stdin instead of respawning
+ * (~1.2s per turn), which is also what allows `--permission-prompt-tool stdio`.
  */
 export class ClaudeSession {
   private proc:DuplexProcess|undefined;
@@ -70,31 +70,31 @@ export class ClaudeSession {
   private turnFail:((e:Error)=>void)|undefined;
   private pumping=false;
   /**
-   * Lượt do CHÍNH CLI mở sau khi `result` đã phát: task nền chạy xong, CLI nạp một
-   * `<task-notification>` vào hàng chờ của nó rồi chạy tiếp một lượt báo cáo — đo được trên
-   * 2.1.272 với đúng bộ cờ ở đây (`task_updated` → `task_notification` → `init` → lượt mới).
-   * Sink của lượt cũ thì generator đã return, nên mọi thứ sau `result` phải đi đường riêng;
-   * không có nó, câu trả lời có thật vẫn tới stdout rồi rơi xuống sàn và tab đứng im.
+   * A turn opened by the CLI ITSELF after `result` was emitted: a background task finished, the CLI loads a
+   * `<task-notification>` into its own queue and runs a report turn — measured on
+   * 2.1.272 with exactly the flags used here (`task_updated` → `task_notification` → `init` → new turn).
+   * The old turn's sink generator has already returned, so everything after `result` needs its own path;
+   * without it, a real answer still reaches stdout, falls on the floor, and the tab sits still.
    */
   private idleSink:Sink|undefined;
   private inTurn=false;
   /**
-   * Đang tự đóng. Hai ý định KHÁC hẳn nhau, gộp một cờ là chỗ lượt chết im lặng:
-   * `interrupt` là người dùng bấm dừng — lượt coi như kết thúc, manager ghi `cancelled`.
-   * `reclaim` là `close()`: hết hạn idle hoặc tắt extension thu hồi process. Lượt đang chạy
-   * mà resolve ở đây thì nó về `done` với ĐÚNG KHÔNG một chữ nào — nhắn xong thấy báo xong
-   * mà chẳng biết vì sao. Nó phải fail kèm lý do.
+   * Closing itself. Two VERY different intents; merging them into one flag is where turns die silently:
+   * `interrupt` is the user pressing stop — the turn counts as ended and the manager writes `cancelled`.
+   * `reclaim` is `close()`: idle expiry or extension shutdown reclaiming the process. A running turn
+   * resolved here would land as `done` with NOT A SINGLE word — you send a message, see it finish,
+   * and never learn why. It must fail with a reason.
    */
   private closing:''|'interrupt'|'reclaim'='';
-  /** Chỉ giữ đuôi để chẩn đoán khi process chết — stderr của lượt dài có thể rất lớn. */
+  /** Only keep the tail for diagnosis when the process dies — stderr of a long turn can be huge. */
   private stderrTail:string[]=[];
   slashCommands:string[]=[];
-  /** Số task nền CLI đang giữ, theo `background_tasks_changed`. Còn >0 là còn báo cáo sẽ tới. */
+  /** Number of background tasks the CLI holds, per `background_tasks_changed`. >0 means reports are still coming. */
   backgroundTasks=0;
   /**
-   * Lượt CLI tự mở đang chạy — cùng định nghĩa với `SessionManager.ingestOutOfTurn` (event
-   * ngoài lượt mở, `turn_done`/`error` đóng) để hai bên không lệch nhau. Lượt này không nằm
-   * trong `busy` của provider: idle timer phải hỏi cờ này, không thì nó đóng process giữa lượt.
+   * A CLI self-opened turn is running — same definition as `SessionManager.ingestOutOfTurn` (an event
+   * outside a turn opens it, `turn_done`/`error` closes it) so the two never drift. This turn is not
+   * in the provider's `busy`: the idle timer must check this flag, or it closes the process mid-turn.
    */
   selfTurn=false;
 
@@ -126,20 +126,20 @@ export class ClaudeSession {
     if(this.opts.permissionMode)args.push('--permission-mode',this.opts.permissionMode);
     if(this.opts.model)args.push('--model',this.opts.model);
     if(this.opts.effort)args.push('--effort',this.opts.effort);
-    // CLI cũ: `--append-system-prompt` tự tắt prompt snapshot, tức mọi chat cũ đổi system prompt
-    // ngay ở lần resume kế. `--help` của 2.1.283 ghi `on` là mặc định kể cả khi có append — cờ thừa
-    // ở bản mới nhưng giữ cho CLI cũ. Chat mới ghi snapshot ĐÃ gồm phần append, chat cũ gửi nguyên
-    // bản ghi sẵn có (append chỉ vào sau khi nén).
+    // Old CLIs: `--append-system-prompt` disables the prompt snapshot, meaning every old chat changes its system prompt
+    // on the next resume. `--help` of 2.1.283 says `on` is the default even with append — the flag is redundant
+    // on new builds but kept for old CLIs. New chats snapshot WITH the appended part, old chats send their
+    // existing record as is (the append only enters after a compaction).
     if(this.opts.appendSystemPrompt)args.push('--append-system-prompt',this.opts.appendSystemPrompt,'--system-prompt-snapshot','on');
     if(this.opts.autoCompact)args.push('--autocompact',this.opts.autoCompact);
-    // Mỗi process claude tự dựng cây MCP riêng (playwright-mcp = 2 process node cho MỖI tab).
-    // Cờ này chỉ nạp server từ `--mcp-config`, mà ta không truyền cái nào — tức không nạp gì.
+    // Every claude process builds its own MCP tree (playwright-mcp = 2 node processes for EACH tab).
+    // This flag only loads servers from `--mcp-config`, and we pass none — i.e. nothing is loaded.
     if(this.opts.strictMcpConfig)args.push('--strict-mcp-config');
     /**
-     * CLI tự tắt Artifact khi thấy mình chạy dưới SDK — mà Dev Hub spawn đúng kiểu đó
-     * (`--input-format stream-json`), nên chat ở đây không publish được trang nào trong khi
-     * cùng cái CLI ở terminal thì publish bình thường. `CLAUDE_CODE_ARTIFACT` truthy là
-     * đường opt-in ngược lại mặc định đó; để trống thì giữ nguyên hành vi mặc định của CLI.
+     * The CLI disables Artifact when it sees it is running under the SDK — and Dev Hub spawns it exactly that way
+     * (`--input-format stream-json`), so chats here couldn't publish a page while
+     * the same CLI in a terminal publishes normally. A truthy `CLAUDE_CODE_ARTIFACT` is
+     * the opt-in that reverses that default; leaving it empty keeps the CLI's default behaviour.
      */
     const envOverrides:any={};
     if(this.opts.artifacts)envOverrides.CLAUDE_CODE_ARTIFACT='1';
@@ -152,7 +152,7 @@ export class ClaudeSession {
     void this.pump();
   }
 
-  /** Không consume stderr thì hàng chờ phình theo log của process sống lâu. */
+  /** Without consuming stderr the buffer grows with the logs of a long-lived process. */
   private async drainStderr(p:DuplexProcess){
     try{ for await(const line of p.stderrLines){ this.stderrTail.push(line); if(this.stderrTail.length>50)this.stderrTail.shift(); } }catch{}
   }
@@ -186,23 +186,23 @@ export class ClaudeSession {
           continue;
         }
         for(const ev of this.parser.parse(raw))this.emit(ev);
-        // `result` của lượt CLI tự mở không kết thúc lượt nào của ta — resolve ở đó là báo
-        // xong cho một lượt đã xong từ lâu, hoặc cho lượt kế vừa gửi.
+        // The `result` of a CLI self-opened turn ends none of our turns — resolving there would report
+        // done for a turn that finished long ago, or for the next turn just sent.
         if(raw?.type==='result'&&this.inTurn){this.inTurn=false;const done=this.turnDone;this.turnDone=undefined;this.turnFail=undefined;done?.();this.askInsights();}
       }
     }finally{
       this.pumping=false;this.inTurn=false;
-      // stdout đóng mà chưa có `result` = process chết giữa lượt. Resolve ở đây sẽ
-      // báo done cho một lượt chưa hề chạy xong; phải cho nó fail.
+      // stdout closed with no `result` = the process died mid-turn. Resolving here would
+      // report done for a turn that never finished; it has to fail.
       const fail=this.turnFail,done=this.turnDone;
       this.turnFail=undefined;this.turnDone=undefined;
       if(this.closing==='reclaim'&&fail)fail(new Error('Claude process was closed while the turn was still running (idle timeout or Dev Hub shutting down) — the turn did not finish.'));
       else if(this.closing)done?.();
       else if(fail)fail(new Error(`Claude process exited before finishing the turn${this.stderrTail.length?`: ${this.stderrTail.join('\n').slice(-2000)}`:''}`));
       else done?.();
-      // Process chết giữa lượt CLI tự mở: không event nào đóng lượt thì manager giữ session
-      // `running` mãi, `isBusy()` true, hàng chờ không flush — tab đứng hẳn. Stop thì
-      // `cancelOutOfTurn` đã tự ghi `cancelled`, không báo thêm.
+      // The process died during a CLI self-opened turn: with no event closing the turn the manager keeps the session
+      // `running` forever, `isBusy()` stays true and the queue never flushes — the tab freezes. On Stop,
+      // `cancelOutOfTurn` already wrote `cancelled`, so report nothing more.
       if(this.selfTurn&&this.closing!=='interrupt')
         this.emit({type:'error',message:this.closing==='reclaim'
           ?'Claude process was closed while a turn it started on its own (background task report) was still running (idle timeout or Dev Hub shutting down) — that turn did not finish.'
@@ -212,7 +212,7 @@ export class ClaudeSession {
     }
   }
 
-  /** Hỏi SAU `result`: câu trả lời mất ~1,5s (CLI gọi server), chờ nó trong lượt là kéo dài lượt. */
+  /** Asked AFTER `result`: the answer takes ~1.5s (the CLI calls the server); waiting for it inside the turn would lengthen the turn. */
   private usageReq:string|undefined;
   private askInsights(){
     const now=Date.now(); if(this.usageReq||now-insightsAskedAt<INSIGHTS_EVERY_MS||!this.proc?.alive())return;
@@ -224,7 +224,7 @@ export class ClaudeSession {
     this.proc?.write(JSON.stringify({type:'control_response',response:{subtype:'success',request_id:requestId,response:decision}}));
   }
 
-  /** Chạy một lượt; resolve khi CLI phát `result`. Sự kiện đi qua `sink`. */
+  /** Runs one turn; resolves when the CLI emits `result`. Events go through `sink`. */
   async send(prompt:string,sink:Sink,resumeId?:string):Promise<void>{
     if(!this.proc?.alive()){this.closing='';this.start(resumeId??this.nativeId,this.newSessionId);}
     this.sink=sink;

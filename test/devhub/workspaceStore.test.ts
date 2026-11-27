@@ -50,15 +50,15 @@ test('two concurrent adds of the same path cannot both slip through the dedupe',
   const dir = await tempDir();
   const store = new WorkspaceStore(dir);
   const ws = await store.createWorkspace('WS');
-  // Phải có SẴN một project: vòng dedupe chỉ await `normalizeProjectPath` khi có gì để so,
-  // và chính khe await đó nằm giữa lúc kiểm tra trùng và lúc push.
+  // A project must ALREADY exist: the dedupe loop only awaits `normalizeProjectPath` when there is something to compare,
+  // and that very await gap sits between the duplicate check and the push.
   await store.addProject(ws.id, {name:'seed', rootPath:dir});
   const results = await Promise.allSettled([
     store.addProject(ws.id, {name:'a', rootPath:os.tmpdir()}),
     store.addProject(ws.id, {name:'b', rootPath:os.tmpdir()}),
   ]);
   const ok = results.filter((r:any)=>r.status==='fulfilled');
-  assert.equal(ok.length, 1, 'đúng một lệnh được thêm, lệnh kia phải bị từ chối');
+  assert.equal(ok.length, 1, 'exactly one command is added, the other must be refused');
   assert.match(String((results.find((r:any)=>r.status==='rejected') as any).reason?.message), /already exists/);
-  assert.equal((await store.snapshot()).projects.length, 2, 'trên đĩa chỉ được có seed + đúng một project mới');
+  assert.equal((await store.snapshot()).projects.length, 2, 'on disk there must be only the seed + exactly one new project');
 });

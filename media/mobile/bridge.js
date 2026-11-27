@@ -1,18 +1,18 @@
 /**
- * Cầu nối cho web app mobile: giả lập API webview của VS Code để `chat.js` chạy nguyên xi.
- * Xuống dùng SSE, lên dùng POST. Phải nạp TRƯỚC `chat.js` — file đó gọi
- * `acquireVsCodeApi()` ngay dòng đầu.
+ * Bridge for the mobile web app: fakes VS Code's webview API so `chat.js` runs unchanged.
+ * SSE downstream, POST upstream. Must load BEFORE `chat.js` — that file calls
+ * `acquireVsCodeApi()` on its first line.
  *
- * Ngoài transport, đây còn là chỗ duy nhất khác biệt về UI: mấy message `pick*` của webview
- * vốn mở QuickPick của workbench, trên điện thoại thì không có gì mở — nên chặn lại tại đây,
- * dựng sheet chọn, rồi gửi giá trị ĐÃ chọn cho server.
+ * Besides transport, this is the only place the UI differs: the webview's `pick*` messages
+ * normally open a workbench QuickPick, and a phone has nothing to open — so they are caught here,
+ * a picker sheet is built, and the CHOSEN value is sent to the server.
  */
 (function(){
   var clientId=null, outbox=[], sse=null, retry=0, restoring=null, restorePhase='', restoreProjectId=null;
   var lastProjectId=null;
-  /** Session đang mở, dạng `provider|id` — chỉ dùng để tô dòng đang xem trong drawer. */
+  /** The open session as `provider|id` — only used to highlight the row being viewed in the drawer. */
   var curSid=null;
-  /** Bản git mới nhất server đẩy xuống — sheet 'Changed files' đọc từ đây. */
+  /** Latest git status pushed by the server — the 'Changed files' sheet reads it from here. */
   var lastScm=null;
   var LAST='devhub.mobile.lastSession';
 
@@ -23,7 +23,7 @@
     if(msg&&typeof msg==='object'&&!msg.__id)msg.__id=Date.now().toString(36)+'-'+(++msgSeq)+'-'+Math.random().toString(36).slice(2,8);
     if(!clientId){outbox.push(msg);return;}
     fetch('/api/msg?c='+encodeURIComponent(clientId),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(msg)})
-      // 409 = server đã quên client này (restart/ngủ). Nối lại rồi gửi lại, đừng nuốt.
+      // 409 = the server forgot this client (restart/sleep). Reconnect and resend; don't swallow it.
       .then(function(r){if(r.status===409){clientId=null;outbox.push(msg);connect();}})
       .catch(function(){clientId=null;outbox.push(msg);connect();});
   }
@@ -42,15 +42,15 @@
     sse.onmessage=function(ev){
       var x; try{x=JSON.parse(ev.data);}catch(e){return;}
       if(x.type==='hello'){
-        // Server đã lên bản khác mà trang vẫn chạy JS cũ (PWA chỉ nối lại SSE): nạp lại, một lần mỗi bản.
+        // The server is on a new build while the page still runs old JS (a PWA only reconnects SSE): reload, once per build.
         var mine='';try{var meta=document.querySelector('meta[name="devhub-build"]');mine=meta?meta.getAttribute('content'):'';}catch(e){}
         if(x.build&&mine&&x.build!==mine){var tried='';try{tried=sessionStorage.getItem('devhub.reloadFor')||'';}catch(e){}
           if(tried!==x.build){try{sessionStorage.setItem('devhub.reloadFor',x.build);}catch(e){}location.reload();return;}}
         clientId=x.clientId; retry=0;
-        // Client mới ở server là một tab trắng; gắn lại session cũ TRƯỚC khi xả outbox.
+        // A new client is a blank tab on the server; re-attach the old session BEFORE flushing the outbox.
         var last=null; lastProjectId=null; try{last=JSON.parse(localStorage.getItem(LAST)||'null');}catch(e){}
         if(!(last&&last.provider&&last.id)){flush();return;}
-        // Chờ server xác nhận rồi mới xả: flush ngay là đua với chính openSession vừa gửi.
+        // Wait for the server to confirm before flushing: flushing now races the openSession just sent.
         if(restoring)clearTimeout(restoring);
         lastProjectId=last.projectId||null; restoreProjectId=lastProjectId; restorePhase='session';
         restoring=setTimeout(doneRestoring,5000);
@@ -61,8 +61,8 @@
         if(restorePhase==='session'&&restoreProjectId&&x.message==='That session is gone.'){
           restorePhase='project'; POST({type:'openProject',projectId:restoreProjectId}); return;
         }
-        // Hết đường gắn lại: vẫn phải xả outbox. Bỏ qua là tin xếp lúc mất mạng nằm lại
-        // tới lần reconnect sau mới bắn ra — trễ và sai ngữ cảnh hơn là báo lỗi ngay.
+        // No way to re-attach: the outbox must still be flushed. Skipping it leaves messages queued offline
+        // to fire on the next reconnect — later and further out of context than reporting an error now.
         doneRestoring();
       }
       if(restoring&&(x.type==='sessionSelected'||x.type==='draftSelected'||x.type==='empty'))doneRestoring();
@@ -80,19 +80,19 @@
     };
     sse.onerror=function(){
       clientId=null;
-      // EventSource tự nối lại, nhưng chỉ khi ống chưa đóng hẳn; đóng hẳn thì tự lo.
+      // EventSource reconnects by itself, but only while the stream is not fully closed; if it is, we handle it.
       if(sse&&sse.readyState===2){retry=Math.min(retry+1,6);setTimeout(connect,Math.pow(2,retry)*250);}
     };
   }
 
-  // ---------- sheet chọn ----------
+  // ---------- picker sheet ----------
   var sheet=null;
   function closeSheet(){var s=document.getElementById('sheet');if(!s)return;s.hidden=true;s.textContent='';sheet=null;}
-  /** Dưới ngưỡng này thì ô lọc chỉ chiếm chỗ; trên nó thì cuộn tay qua 40 repo mới là cái tốn. */
+  /** Below this the filter box only takes space; above it, scrolling past 40 repos is the real cost. */
   var FILTER_MIN=8;
-  /** `stacked`: dòng hai tầng, dành cho danh sách mà chú thích dài (session), chứ không cho
-   *  project — ở đó chú thích chỉ là tên workspace và một tầng vừa gấp đôi số dòng thấy được. */
-  /** `note`: một dòng chữ trên danh sách — chat.js không có toast, đây là chỗ báo kết quả vừa bấm. */
+  /** `stacked`: two-line rows, for lists with long descriptions (sessions), not for
+   *  projects — there the description is just the workspace name and two lines halve the visible rows. */
+  /** `note`: one line of text above the list — chat.js has no toast, so this is where a tap reports its result. */
   function openSheet(title,items,onPick,stacked,note){
     var s=document.getElementById('sheet'); if(!s)return;
     s.textContent=''; s.hidden=false; sheet=s;
@@ -111,7 +111,7 @@
       row.appendChild(main);
       if(it.description){var d=document.createElement('span');d.className='sheet-desc';d.textContent=it.description;row.appendChild(d);}
       row.onclick=function(){closeSheet();onPick(it);};
-      // Lọc cả description: repo hay được nhớ theo workspace ("acme") chứ không theo tên đầy đủ.
+      // Filter on the description too: repos are often remembered by workspace ("acme"), not by full name.
       rows.push({el:row,hay:(it.label+' '+(it.description||'')).toLowerCase()});
       list.appendChild(row);
     })(items[i]);
@@ -120,10 +120,10 @@
     s.onclick=function(ev){if(ev.target===s)closeSheet();};
   }
   /**
-   * Ô lọc của sheet. Mỗi từ khoá phải khớp ĐỘC LẬP (gõ "chat admin" ra order-chatbot-admin),
-   * vì tên repo dài thì thứ người ta nhớ là hai mảnh rời chứ không phải một chuỗi liền.
-   * WebKit 279904: trong PWA cài ra home screen, tap input KHÔNG bật bàn phím — nên đây là
-   * tiện ích cho tab Safari, không phải đường duy nhất tới một dòng (cuộn vẫn còn).
+   * The sheet's filter box. Each keyword must match INDEPENDENTLY (typing "chat admin" finds order-chatbot-admin),
+   * because with long repo names what people remember is two separate fragments, not one contiguous string.
+   * WebKit 279904: in a PWA installed to the home screen, tapping an input does NOT raise the keyboard — so this
+   * is a convenience for the Safari tab, not the only way to reach a row (scrolling still works).
    */
   function filterBar(rows,list){
     var wrap=document.createElement('div'); wrap.className='sheet-filter';
@@ -176,7 +176,7 @@
     state().then(function(s){
       var byWs={}; for(var i=0;i<s.workspaces.length;i++)byWs[s.workspaces[i].id]=s.workspaces[i].name;
       var items=s.projects.map(function(p){return {label:p.name,description:byWs[p.workspaceId]||p.rootPath,value:p.id};});
-      // `account` chỉ có khi host đặt altAccountFile; không có thì không hiện lối vào.
+      // `account` only exists when the host sets altAccountFile; without it the entry point is hidden.
       var hasAcct=s.projects.some(function(p){return !!p.account;});
       if(hasAcct)items.unshift({label:'\u21C4 Claude account\u2026',value:'__account__'});
       openSheet('Project',items,function(it){
@@ -185,7 +185,7 @@
       });
     });
   }
-  /** Bản mobile của `Switch Claude Account`: chạm một project là đảo acc của nó, như lệnh desktop. */
+  /** Mobile version of `Switch Claude Account`: tapping a project flips its account, like the desktop command. */
   function pickAccount(note){
     state().then(function(s){
       var byWs={}; for(var i=0;i<s.workspaces.length;i++)byWs[s.workspaces[i].id]=s.workspaces[i].name;
@@ -207,11 +207,11 @@
               value:x.provider+'|'+x.nativeSessionId};
     });
   }
-  // ---------- drawer lịch sử ----------
+  // ---------- history drawer ----------
   /**
-   * Lịch sử là ngăn kéo mép trái chứ không phải bottom sheet như mấy picker khác: đây là thứ
-   * bấm nhiều nhất trên điện thoại, và vuốt tới được bằng ngón đang giữ máy — nút 🕓 thì nằm
-   * tận đỉnh header. Dòng dùng lại đúng class `sheet-*` để không sinh bảng màu thứ hai.
+   * History is a left-edge drawer, not a bottom sheet like the other pickers: it is the most
+   * tapped thing on a phone and reachable with the thumb holding the device — the 🕓 button sits
+   * at the very top of the header. Rows reuse the `sheet-*` classes so there is no second palette.
    */
   var drawer=null,dScrim=null,dBox=null,dOpen=false,dHide=null;
   function dcls(open,drag){if(drawer)drawer.className=(open?'open':'')+(drag?' dragging':'');}
@@ -223,11 +223,11 @@
     document.body.appendChild(drawer);
   }
   function showDrawer(){if(!drawer)buildDrawer();if(dHide){clearTimeout(dHide);dHide=null;}drawer.hidden=false;}
-  /** Chỉ chốt trạng thái; không fetch lại — kéo tay gọi hàm này ở lúc nhả ngón. */
+  /** Only settles state; does not refetch — dragging calls this when the finger lifts. */
   function settle(open){
     if(!drawer)return;
     dcls(open,false); dBox.style.transform=''; drawer.style.removeProperty('--d-op'); dOpen=open;
-    // Ẩn hẳn sau khi trượt xong: scrim trong suốt vẫn ăn tap nếu để nguyên trong DOM.
+    // Hide fully once the slide ends: a transparent scrim still eats taps if left in the DOM.
     if(!open)dHide=setTimeout(function(){dHide=null;if(!dOpen)drawer.hidden=true;},220);
   }
   function drawerHead(){
@@ -238,9 +238,9 @@
     head.appendChild(nu); return head;
   }
   /**
-   * MỌI session, không lọc theo project: trên điện thoại ngăn kéo này là cách duy nhất nhảy
-   * ngang giữa các repo (không có cây bên trái), mà lọc theo project thì đúng cái đó bị chặn.
-   * Danh sách đã sắp theo lần sửa gần nhất ở host, và mỗi dòng tự mang tên project.
+   * EVERY session, not filtered by project: on a phone this drawer is the only way to jump
+   * between repos (there is no tree on the left), and filtering by project would block exactly that.
+   * The list is already sorted by last update on the host, and each row carries its project name.
    */
   function fillDrawer(){
     if(!drawer)buildDrawer();
@@ -265,13 +265,14 @@
   function pickHistory(){showDrawer();fillDrawer();settle(true);}
 
   /**
-   * Kéo từ mép trái để mở, kéo ngược để đóng. Chỉ nhận khi ngón đi ngang hơn dọc: trong khung
-   * chat có khối code cuộn ngang được, và cuộn dọc thì tuyệt đối không được đụng.
-   * Chú ý: trong tab Safari, gesture mép trái là "back" của trình duyệt và nó thắng — chỉ PWA
-   * cài ra home screen mới ăn chắc, nên nút 🕓 vẫn là đường vào chính thức.
+   * Drag from the left edge to open, drag back to close. Only engages when the finger moves more
+   * horizontally than vertically: the chat has horizontally scrollable code blocks, and vertical
+   * scrolling must never be touched.
+   * Note: in a Safari tab the left-edge gesture is the browser's "back" and it wins — only a PWA
+   * installed to the home screen gets it reliably, so the 🕓 button stays the official way in.
    */
-  // Vuốt nhẹ (flick) ăn ngay theo hướng ngón, không cần kéo hết nửa khung; ngưỡng vị trí chỉ
-  // dùng khi ngón dừng hẳn rồi mới nhả, và đo theo QUÃNG đã kéo nên đóng cũng nhẹ như mở.
+  // A light flick commits right away in the finger's direction, no need to drag half the panel; the position
+  // threshold only applies when the finger stops before lifting, and it measures DISTANCE dragged so closing is as light as opening.
   var EDGE=28,AXIS=8,FLICK=0.25,gid=null,gx0=0,gy0=0,gLock=0,gW=0,gDx=0,gVx=0,gPx=0,gPt=0;
   function boxW(){return (dBox&&dBox.offsetWidth)||Math.min(340,Math.round((window.innerWidth||360)*0.82));}
   function onStart(e){
@@ -290,8 +291,8 @@
       gW=boxW(); dcls(dOpen,true);
     }
     if(e.cancelable)e.preventDefault();
-    // Mẫu vận tốc cách nhau >8ms: hai điểm sát nhau chia ra số vô nghĩa, và ngón dừng lại
-    // thì gVx cũng phải tụt về 0 chứ không giữ tốc độ cũ.
+    // Velocity samples >8ms apart: two points too close divide into nonsense, and when the finger stops
+    // gVx must fall back to 0 instead of keeping the old speed.
     var now=e.timeStamp||Date.now(),dt=now-gPt; if(dt>8){gVx=(t.clientX-gPx)/dt; gPx=t.clientX; gPt=now;}
     gDx=dOpen?Math.max(-gW,Math.min(0,dx)):Math.max(0,Math.min(gW,dx));
     var at=(dOpen?gW:0)+gDx;
@@ -315,10 +316,10 @@
     window.open('/api/file?p='+encodeURIComponent(btoa(unescape(encodeURIComponent(p))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')),'_blank');
   }
 
-  // Message do bridge tự xử; phần còn lại đi thẳng ra server.
+  // Messages the bridge handles itself; the rest go straight to the server.
   /**
-   * Chip git bấm được trên desktop thì mở file; ở đây mở file là chuyện không có thật
-   * (xem `openPath`), nên sheet này CHỈ để đọc — danh sách file kèm +/-, chạm thì đóng lại.
+   * The git chip opens a file when clicked on desktop; opening a file here is not a real thing
+   * (see `openPath`), so this sheet is READ-ONLY — the file list with +/-, tap to close.
    */
   function pickChanged(){
     var cs=(lastScm&&lastScm.changes)||[];
@@ -327,17 +328,17 @@
     }),function(){});
   }
   /**
-   * Clipboard phải là của MÁY ĐANG XEM. Đẩy qua host thì ID rơi vào clipboard của máy chạy
-   * VS Code, còn cái điện thoại đang cầm thì không có gì.
+   * The clipboard must belong to the DEVICE BEING VIEWED. Going through the host puts the ID on the
+   * clipboard of the machine running VS Code, and the phone in your hand gets nothing.
    */
   function copySessionId(){
     var id=(curSid||'').split('|')[1]||'';
     if(!id){inbound({type:'error',message:'No session yet.'});return;}
-    // Không có toast trong chat.js; đổi nhãn chính nút vừa bấm là phản hồi rẻ nhất mà thấy được.
+    // chat.js has no toast; relabelling the button just tapped is the cheapest visible feedback.
     var btn=document.getElementById('copyid');
     var ok=function(){if(!btn)return;btn.textContent='\u2713';setTimeout(function(){btn.textContent='ID';},1200);};
     try{
-      // navigator.clipboard chỉ có trên secure context; LAN thì là http trần, nên phải có đường lùi.
+      // navigator.clipboard only exists in a secure context; on the LAN it is plain http, so a fallback is required.
       if(navigator.clipboard&&navigator.clipboard.writeText)
         navigator.clipboard.writeText(id).then(ok,function(){prompt('Session ID',id);});
       else prompt('Session ID',id);
@@ -351,7 +352,7 @@
       postMessage:function(msg){
         if(!msg||typeof msg!=='object')return;
         if(LOCAL[msg.type]){LOCAL[msg.type]();return;}
-        // href đến từ markdown do agent sinh ra: chỉ http(s), y như host lọc ở webviewProtocol.
+        // href comes from agent-generated markdown: http(s) only, exactly as the host filters in webviewProtocol.
         if(msg.type==='openLink'){
           if(/^https?:\/\//i.test(String(msg.href||'')))window.open(msg.href,'_blank','noopener');
           else inbound({type:'error',message:'Refused to open a non-http link: '+String(msg.href||'').slice(0,200)});
@@ -360,15 +361,15 @@
         if(msg.type==='openFile'){openPath(msg.path);return;}
         POST(msg);
       },
-      // `chat.js` dùng chỗ này để giữ nháp qua lần reload; localStorage là bản mobile của nó.
+      // `chat.js` uses this to keep the draft across reloads; localStorage is its mobile version.
       getState:function(){try{return JSON.parse(localStorage.getItem('devhub.mobile.state')||'null');}catch(e){return null;}},
       setState:function(v){try{localStorage.setItem('devhub.mobile.state',JSON.stringify(v));}catch(e){}}
     };
   };
-  // `?vv=1`: iPhone ở đây không cắm Web Inspector được, nên in số đo thẳng lên màn hình. Đây là
-  // thứ duy nhất phân biệt được "hụt canvas" với "bị pan" — hai cái nhìn bằng mắt giống hệt nhau.
-  // `window.location` chứ không phải `location` trần: bridge chạy trong test với đúng bộ global
-  // được truyền vào (mobileServer.test.ts), ở đó không có biến toàn cục `location`.
+  // `?vv=1`: the iPhone can't be attached to Web Inspector here, so measurements are printed on screen. This is
+  // the only thing that tells "canvas too short" from "panned" — the two look identical.
+  // `window.location`, not bare `location`: the bridge runs in tests with exactly the globals
+  // passed in (mobileServer.test.ts), where there is no global `location`.
   if(/[?&]vv=1/.test((window.location||{}).search||'')){
     var vvBox=document.createElement('div');vvBox.id='vvdebug';document.body.appendChild(vvBox);
     var vvDraw=function(){
@@ -379,7 +380,7 @@
         +'\nscrollY '+Math.round(window.scrollY||0)+'  kb '+(document.body.dataset.keyboard||'-')
         +'\nbody '+Math.round(document.body.getBoundingClientRect().height)
         +'  footer.bottom '+(r?Math.round(r.bottom):'?')
-        +'\nđáy nhìn thấy '+Math.round((v.offsetTop||0)+(v.height||0));
+        +'\nvisible bottom '+Math.round((v.offsetTop||0)+(v.height||0));
     };
     if(window.visualViewport){window.visualViewport.addEventListener('resize',vvDraw);
       window.visualViewport.addEventListener('scroll',vvDraw);}
@@ -387,12 +388,12 @@
     document.addEventListener('focusout',function(){setTimeout(vvDraw,250);});
     setInterval(vvDraw,500);vvDraw();
   }
-  // `chat.css` đẩy contrast của chữ đậm qua class theme mà workbench gắn lên body; ở đây
-  // không có ai gắn, nên `--strong` sẽ kẹt ở giá trị mặc định.
+  // `chat.css` raises bold-text contrast via the theme class the workbench puts on body; here
+  // nobody sets it, so `--strong` would be stuck at its default.
   try{document.body.classList.add(window.matchMedia('(prefers-color-scheme: dark)').matches?'vscode-dark':'vscode-light');}catch(e){}
-  // Trên điện thoại Enter là xuống dòng như ChatGPT. `chat.js` được nạp sau bridge và gắn
-  // handler bubble Enter-to-send lên textarea; capture listener này chặn handler đó nhưng KHÔNG
-  // preventDefault, nên WebKit vẫn tự chèn newline. Gửi chỉ còn nút ↑.
+  // On a phone Enter inserts a newline, like ChatGPT. `chat.js` loads after the bridge and attaches
+  // a bubbling Enter-to-send handler to the textarea; this capture listener blocks that handler but does NOT
+  // preventDefault, so WebKit still inserts the newline. Sending is the ↑ button only.
   document.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&e.target&&e.target.id==='input')e.stopImmediatePropagation();
   },true);

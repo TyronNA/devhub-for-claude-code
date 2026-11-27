@@ -2,7 +2,7 @@ const cp = require('node:child_process');
 
 export interface PsRow { pid:number; ppid:number; rssKb:number; }
 
-/** `ps -Ao pid=,ppid=,rss=`: ba cột, không header. Dòng rác thì bỏ, không ném. */
+/** `ps -Ao pid=,ppid=,rss=`: three columns, no header. Junk lines are skipped, not thrown. */
 export function parsePsRows(out:string):PsRow[]{
   const rows:PsRow[]=[];
   for(const line of String(out).split('\n')){
@@ -13,9 +13,9 @@ export function parsePsRows(out:string):PsRow[]{
 }
 
 /**
- * RSS của `claude` KHÔNG gồm MCP server nó đẻ ra, mà đó mới là phần phình (một stdio server
- * = 2 process node cho MỖI chat). Nên cộng cả cây con, và `seen` để một pid nằm dưới hai gốc
- * không bị đếm hai lần.
+ * `claude`'s RSS does NOT include the MCP servers it spawns, and those are what bloat (one stdio server
+ * = 2 node processes for EACH chat). So sum the whole subtree, with `seen` so a pid under two roots
+ * isn't counted twice.
  */
 export function sumRssKb(rows:PsRow[],roots:number[]):number{
   const kids=new Map<number,number[]>(); const rss=new Map<number,number>();
@@ -30,7 +30,7 @@ export function sumRssKb(rows:PsRow[],roots:number[]):number{
   return total;
 }
 
-/** Tổng RAM (MB) của các pid đó và con cháu. 0 pid = không spawn `ps` nào cả. */
+/** Total RAM (MB) of those pids and their descendants. 0 pids = no `ps` spawned at all. */
 export async function cliMemoryMB(pids:number[],exec:(cmd:string,args:string[])=>Promise<string> = run):Promise<number>{
   if(!pids.length)return 0;
   const out=await exec('ps',['-Ao','pid=,ppid=,rss=']);

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Đo layout/style/heap của script webview trong Chrome thật qua CDP (không cần playwright).
+// Measures layout/style/heap of the webview script in real Chrome over CDP (no playwright needed).
 //   node scripts/measure-webview.js [HEAD] [<rev>...]
-// LayoutCount là số cần đọc: đọc scrollHeight ngay sau khi sửa DOM ép browser tính lại
-// layout, nên "N event -> N layout" chính là thrash.
+// LayoutCount is the number to read: reading scrollHeight right after a DOM change forces the browser to
+// recompute layout, so "N events -> N layouts" is exactly thrash.
 const cp = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -12,7 +12,7 @@ const REPO = path.resolve(__dirname, '..');
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** css/script mà html() nhúng, cho một revision bất kỳ ('WORKTREE' = cây làm việc). */
+/** The css/script html() inlines, for any revision ('WORKTREE' = the working tree). */
 function assets(rev) {
   const src = rev === 'WORKTREE'
     ? fs.readFileSync(path.join(REPO, 'src/devhub/views/chatPanelProvider.ts'), 'utf8')
@@ -22,7 +22,7 @@ function assets(rev) {
   const js = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  // Phải nằm cạnh các module đã build, nếu không import tương đối không resolve được.
+  // Must sit next to the built modules, or relative imports won't resolve.
   const file = path.join(REPO, 'dist/src/devhub/views', `__measure-${rev.replace(/[^a-z0-9]/gi, '')}.js`);
   fs.writeFileSync(file, js);
   const Module = require('node:module');
@@ -55,7 +55,7 @@ async function launch(port) {
     await sleep(125);
   }
   child.kill('SIGKILL');
-  throw new Error(`Chrome không mở được CDP (CHROME_PATH=${CHROME})`);
+  throw new Error(`Chrome did not open CDP (CHROME_PATH=${CHROME})`);
 }
 
 class CDP {
@@ -84,7 +84,7 @@ async function connect(port) {
   return new CDP(ws);
 }
 
-/** Trang thật: body + css + script y như webview, cộng shim acquireVsCodeApi. */
+/** The real page: body + css + script exactly as in the webview, plus an acquireVsCodeApi shim. */
 const pageHtml = (a) => `<!doctype html><html><head><meta charset="utf-8"><style>${a.css}</style></head>` +
   `<body>${a.body}<script>window.__posted=[];` +
   `window.acquireVsCodeApi=()=>({postMessage:m=>window.__posted.push(m),setState(){},getState(){return null}});</script>` +
@@ -112,23 +112,23 @@ async function probe(cdp, a, label, expression) {
 }
 
 const SESSION = `{provider:'claude',nativeSessionId:'a',status:'done',usage:{contextUsedTokens:100,contextWindowTokens:1000}}`;
-/** Mở transcript: một lần sessionSelected dựng hết. */
+/** Opening a transcript: one sessionSelected builds everything. */
 const openExpr = (n) => `(()=>{
   const evs=Array.from({length:${n}},(_,i)=>({type:i%4===0?'user_message':'assistant_message',
-    text:'dòng '+i+' — '+'x'.repeat(80)}));
+    text:'line '+i+' — '+'x'.repeat(80)}));
   const t0=performance.now();
   window.dispatchEvent(new MessageEvent('message',{data:{type:'sessionSelected',session:${SESSION},
     events:evs,workspace:{name:'W'},project:{name:'P'}}}));
   return JSON.stringify({ms:performance.now()-t0,nodes:document.getElementById('messages').children.length});
 })()`;
-/** Streaming: mỗi event một message, giống lúc agent đang trả lời. */
+/** Streaming: one message per event, as when an agent is replying. */
 const streamExpr = (n) => `(()=>{
   window.dispatchEvent(new MessageEvent('message',{data:{type:'sessionSelected',
     session:{provider:'claude',nativeSessionId:'a',status:'running',usage:{}},events:[],
     workspace:{name:'W'},project:{name:'P'}}}));
   const t0=performance.now();
   for(let i=0;i<${n};i++)window.dispatchEvent(new MessageEvent('message',{data:{type:'event',sessionId:'a',
-    event:{type:'assistant_message',text:'dòng '+i+' — '+'x'.repeat(80)}}}));
+    event:{type:'assistant_message',text:'line '+i+' — '+'x'.repeat(80)}}}));
   return JSON.stringify({ms:performance.now()-t0,nodes:document.getElementById('messages').children.length});
 })()`;
 

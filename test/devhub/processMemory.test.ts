@@ -6,10 +6,10 @@ import { cliMemoryMB, parsePsRows, sumRssKb } from '../../src/devhub/providers/p
 const PS=[
   ' 1     0   9000',
   ' 100   1   180000',   // claude A
-  ' 101   100 60000',    // mcp con của A
-  ' 102   101 20000',    // cháu
+  ' 101   100 60000',    // A's mcp child
+  ' 102   101 20000',    // grandchild
   ' 200   1   200000',   // claude B
-  ' 300   1   500000',   // process của người khác
+  ' 300   1   500000',   // someone else's process
   'ps: bad line',
 ].join('\n');
 
@@ -21,7 +21,7 @@ test('ps output is parsed into rows and garbage lines are skipped',()=>{
 
 test('a CLI counts its whole process tree, because the MCP servers are the fat part',()=>{
   assert.equal(sumRssKb(parsePsRows(PS),[100]),180000+60000+20000);
-  assert.equal(sumRssKb(parsePsRows(PS),[100,200]),260000+200000,'chỉ cộng cây của mình, không cộng pid 300');
+  assert.equal(sumRssKb(parsePsRows(PS),[100,200]),260000+200000,'only sums its own tree, not pid 300');
 });
 
 test('a pid listed twice, or already inside another tree, is counted once',()=>{
@@ -35,7 +35,7 @@ test('a pid that has already died contributes nothing instead of throwing',()=>{
 test('no live CLI means no ps at all',async()=>{
   let spawned=0;
   const mb=await cliMemoryMB([],async()=>{spawned++;return PS;});
-  assert.equal(mb,0);assert.equal(spawned,0,'không có process nào thì đừng spawn ps');
+  assert.equal(mb,0);assert.equal(spawned,0,'no processes means do not spawn ps');
 });
 
 test('the total is reported in MB',async()=>{

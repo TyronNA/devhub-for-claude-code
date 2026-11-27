@@ -8,17 +8,17 @@ import { HistoryScanCache } from '../historyUtils';
 import { ClaudeSession, PermissionRequest, PermissionDecision } from './claudeSession';
 import { isUnder } from './claudeAccount';
 
-/** Claude không có cờ `--image` cho stream-json; nó đọc file bằng tool Read, nên đường dẫn
- *  đi kèm prompt là cách gắn ảnh khả dụng. */
+/** Claude has no `--image` flag for stream-json; it reads files with the Read tool, so a path
+ *  sent along with the prompt is the workable way to attach an image. */
 export function withImages(prompt:string,images?:string[]){
   return images&&images.length?[...images,prompt].filter(Boolean).join('\n'):prompt;
 }
 
 /**
- * Hàm nghịch của `withImages`: transcript đọc lại chỉ còn mấy dòng path trần ở đầu prompt,
- * tách chúng về `images` để bong bóng vẽ lại ảnh. Ở cạnh `withImages` vì hai hàm phải đổi
- * cùng nhau — panel và trang mobile đều gọi hàm này, tự viết lại là một chỗ quên.
- * Không stat file: ảnh bị dọn theo TTL thì `alt` (tên file) là thứ đúng để hiện.
+ * Inverse of `withImages`: a re-read transcript only has a few bare path lines at the start of the prompt;
+ * split them back into `images` so the bubble redraws the images. It sits next to `withImages` because the two must change
+ * together — both the panel and the mobile page call this, and rewriting it is one more place to forget.
+ * Doesn't stat the file: if an image was cleaned up by TTL, `alt` (the file name) is the right thing to show.
  */
 export function recoverImages(event:any,attachmentRoot:string){
   if(event?.type!=='user_message'||event.images||typeof event.text!=='string')return event;
@@ -30,19 +30,19 @@ export function recoverImages(event:any,attachmentRoot:string){
 export class ClaudeProvider implements AgentProvider {
   readonly id='claude' as const; private availableCache:{at:number;value:boolean}|undefined; private transcriptIndex=new Map<string,string>(); private scanCache=new HistoryScanCache<ClaudeFileFacts>();
   constructor(private runner:ProcessRunner, private executable='claude', private maxHistory=1500,private historyRoot?:string, private permissionMode?:string, private appendSystemPrompt?:string, private idleTtlMs=30*60*1000, private autoCompact?:string, private strictMcpConfig?:boolean, private artifacts?:boolean, private promptCacheTtl?:'5m'|'1h'){}
-  async isAvailable(){ if(this.availableCache&&Date.now()-this.availableCache.at<60000)return this.availableCache.value; const value=await this.runner.isAvailable(this.executable); this.availableCache=value?{at:Date.now(),value}:undefined; return value; } // không cache false: một lần hụt không được chặn mọi lượt trong 60s
+  async isAvailable(){ if(this.availableCache&&Date.now()-this.availableCache.at<60000)return this.availableCache.value; const value=await this.runner.isAvailable(this.executable); this.availableCache=value?{at:Date.now(),value}:undefined; return value; } // don't cache false: one miss must not block every turn for 60s
   async start(input:StartSessionInput){ const id=crypto.randomUUID(); return this.launch(input.cwd,withImages(input.prompt,input.images),id,undefined,input); }
   async resume(input:ResumeSessionInput){ return this.launch(input.session.cwd,withImages(input.prompt,input.images),input.session.nativeSessionId,input.session.nativeSessionId,input); }
-  /** Một ClaudeSession cho mỗi nativeSessionId; process sống tới khi đóng. */
+  /** One ClaudeSession per nativeSessionId; the process lives until closed. */
   private sessions=new Map<string,ClaudeSession>();
   private idleTimers=new Map<string,any>();
-  /** Session đang chạy một lượt. Giữ theo object nên rekey (`draft` -> id thật) không mất dấu. */
+  /** Sessions running a turn. Held by object so a rekey (`draft` -> real id) doesn't lose track. */
   private busy=new Set<ClaudeSession>();
   /**
-   * Mỗi session giữ một process `claude` (đo được 120-270MB, trung bình ~200MB). Không cap
-   * số tab, nhưng phải thu hồi khi bỏ không.
-   * "Idle" tính từ lúc lượt KẾT THÚC — hẹn giờ trong lúc đang chạy sẽ kill process giữa lượt
-   * khi lượt dài hơn TTL (mặc định 30 phút).
+   * Each session keeps one `claude` process (measured 120-270MB, ~200MB on average). The number of tabs
+   * isn't capped, but idle ones must be reclaimed.
+   * "Idle" counts from when the turn ENDS — a timer armed while running would kill the process mid-turn
+   * when the turn outlasts the TTL (30 minutes by default).
    */
   private touch(key:string){
     const old=this.idleTimers.get(key); if(old)clearTimeout(old);
@@ -51,14 +51,14 @@ export class ClaudeProvider implements AgentProvider {
     const live=this.sessions.get(key);
     if(live&&this.busy.has(live))return;
     const t:any=setTimeout(()=>{this.idleTimers.delete(key);
-      // Task nền còn chạy: thu hồi process lúc này là vứt luôn lượt báo cáo CLI sẽ tự mở khi
-      // nó xong. Job dựng ảnh chạy cả tiếng vượt TTL rất dễ, nên hẹn lại chứ không đóng.
-      // Task xong thì `backgroundTasks` về 0 NGAY lúc CLI mở lượt báo cáo — lượt đó không có
-      // trong `busy`, nên phải hỏi thêm `selfTurn`: transcript thật có lượt bị giết đúng 1800s/3600s.
+      // A background task is still running: reclaiming the process now throws away the report turn the CLI opens by itself when
+      // it finishes. An image-building job running for an hour easily outlasts the TTL, so re-arm rather than close.
+      // When a task finishes, `backgroundTasks` drops to 0 the MOMENT the CLI opens the report turn — that turn isn't
+      // in `busy`, so `selfTurn` must be checked too: real transcripts had turns killed at exactly 1800s/3600s.
       const s=this.sessions.get(key);
       if(s&&s.alive()&&(s.backgroundTasks>0||s.selfTurn)){this.touch(key);return;}
       this.closeSession(key);},this.idleTtlMs);
-    t.unref?.();  // đừng giữ event loop sống chỉ vì một timer nhàn rỗi
+    t.unref?.();  // don't keep the event loop alive just for an idle timer
     this.idleTimers.set(key,t);
   }
   dispose(){for(const t of this.idleTimers.values())clearTimeout(t);this.idleTimers.clear();this.busy.clear();
@@ -66,18 +66,18 @@ export class ClaudeProvider implements AgentProvider {
   private permissionSink?:(p:PermissionRequest&{sessionId:string})=>void;
   setPermissionSink(fn:(p:PermissionRequest&{sessionId:string})=>void){this.permissionSink=fn;}
   /**
-   * Sự kiện tới NGOÀI lượt: CLI tự mở lượt báo cáo khi một task nền xong. Lúc đó không còn
-   * `ProviderTurnHandle` nào sống để nhận, nên nó phải đi thẳng lên manager kèm session id.
+   * Events arriving OUTSIDE a turn: the CLI opens a report turn by itself when a background task finishes. There is no
+   * live `ProviderTurnHandle` left to receive it, so it goes straight up to the manager with the session id.
    */
   private idleEventSink?:(sessionId:string,event:DevHubEvent)=>void;
   setIdleEventSink(fn:(sessionId:string,event:DevHubEvent)=>void){this.idleEventSink=fn;}
   answerPermission(sessionId:string,requestId:string,decision:PermissionDecision){
     this.sessions.get(sessionId)?.respond(requestId,decision);
   }
-  /** Slash command là cấu hình của người dùng, không thuộc riêng session nào — nhớ lại
-   *  lần đầu bất kỳ session nào khai báo, để tab đã đóng/khôi phục vẫn dùng được. */
+  /** Slash commands are the user's configuration, not tied to any session — remember them
+   *  the first time any session declares them, so closed/restored tabs can still use them. */
   private knownSlash:string[]=[];
-  /** Lưu qua Reload Window: sau reload `sessions` rỗng nên cache RAM mất, `/` chết cho tới lượt kế. */
+  /** Persisted across Reload Window: after a reload `sessions` is empty so the RAM cache is gone and `/` is dead until the next turn. */
   private persistSlash?:(v:string[])=>void;
   setSlashStore(load:()=>string[],save:(v:string[])=>void){
     if(!this.knownSlash.length)this.knownSlash=load()||[];
@@ -90,22 +90,22 @@ export class ClaudeProvider implements AgentProvider {
     if(found&&found.join('\u0000')!==this.knownSlash.join('\u0000')){this.knownSlash=found;this.persistSlash?.(found);}
     return this.knownSlash;
   }
-  /** pid của mọi session còn giữ process — cây hỏi cái này để cộng RAM. */
+  /** pids of every session still holding a process — the tree asks this to sum RAM. */
   livePids():number[]{const out:number[]=[];for(const s of this.sessions.values()){const pid=s.pid;if(pid)out.push(pid);}return out;}
   /**
-   * Đổi acc của một project: process đang sống vẫn giữ token lúc spawn. Không đóng ngay — có thể
-   * đang giữa lượt (kể cả lượt tự mở) — mà đánh dấu, lượt kế đóng rồi spawn lại qua wrapper
-   * với `--resume`, y như đổi model.
+   * Switching a project's account: a live process keeps the token it was spawned with. Don't close it right away — it may
+   * be mid-turn (including a self-opened turn) — but mark it; the next turn closes and respawns through the wrapper
+   * with `--resume`, exactly like a model change.
    */
   private retired=new WeakSet<ClaudeSession>();
   retireUnder(root:string){let n=0;for(const s of this.sessions.values())if(isUnder(s.cwd,root)){this.retired.add(s);n++;}return n;}
   closeSession(id:string){const t=this.idleTimers.get(id);if(t)clearTimeout(t);this.idleTimers.delete(id);const s=this.sessions.get(id);this.sessions.delete(id);if(s)this.busy.delete(s);void s?.close();}
 
-  /** Nút dừng trên một lượt CLI tự mở: manager không có handle nào để gọi, phải với thẳng
-   *  vào session đang giữ process. Không có cái này thì `cancel()` return im lặng. */
+  /** The stop button on a CLI self-opened turn: the manager has no handle to call, so reach straight
+   *  into the session holding the process. Without this `cancel()` returns silently. */
   async interruptOutOfTurn(nativeId:string){
-    // Tra cả theo `s.id`: rekey chỉ chạy ở `result` của lượt đầu, id thật CLI khai sau đó
-    // là id manager biết mà map vẫn còn giữ key cũ.
+    // Also look up by `s.id`: rekey only runs at the first turn's `result`, so the real id the CLI declares afterwards
+    // is the id the manager knows while the map still holds the old key.
     let key=nativeId,s=this.sessions.get(key);
     if(!s)for(const [k,v] of this.sessions)if(v.id===nativeId){key=k;s=v;break;}
     if(!s||!s.alive())return false;
@@ -126,7 +126,7 @@ export class ClaudeProvider implements AgentProvider {
         {model:opts.model,effort:opts.effort,permissionMode:this.permissionMode,appendSystemPrompt:this.appendSystemPrompt,autoCompact:this.autoCompact,strictMcpConfig:this.strictMcpConfig,artifacts:this.artifacts,promptCacheTtl:this.promptCacheTtl},
         req=>this.permissionSink?.({...req,sessionId:session!.id??key}),
         ()=>{ if(session&&this.sessions.get(key)===session&&!session.alive())this.sessions.delete(key); });
-      // Đọc `s.id` lúc phát chứ không chụp trước: lượt đầu rekey từ `pending:` sang id thật.
+      // Read `s.id` at emit time rather than capturing it up front: the first turn rekeys from `pending:` to the real id.
       const s=session; s.setIdleSink(e=>this.idleEventSink?.(s.id??key,e));
       this.sessions.set(key,session);
     }
@@ -136,8 +136,8 @@ export class ClaudeProvider implements AgentProvider {
     const run=live.send(prompt,push,resumeId).catch((e:any)=>{
       push({type:'error',message:`Claude failed: ${e?.message||e}`,timestamp:Date.now()} as DevHubEvent);
     }).finally(()=>{ended=true;this.busy.delete(live);
-      // touch theo KEY, không theo id thật: lúc này map chưa rekey, nên `touch(live.id)` sẽ
-      // hẹn giờ trên session KHÁC đang giữ id đó. `run.then` bên dưới touch lại sau khi rekey.
+      // touch by KEY, not by real id: the map hasn't been rekeyed yet, so `touch(live.id)` would
+      // arm the timer on ANOTHER session holding that id. `run.then` below touches again after the rekey.
       this.touch(key);const w=waiter;waiter=undefined;w?.();});
 
     const events=(async function*(){
@@ -147,11 +147,11 @@ export class ClaudeProvider implements AgentProvider {
         await new Promise<void>(r=>{waiter=r;});
       }
     })();
-    // Rekey khi CLI cấp session id thật cho lượt đầu.
+    // Rekey when the CLI issues the real session id for the first turn.
     void run.then(()=>{const real=live.id;
       if(real&&real!==key&&!this.sessions.has(real)){
         this.sessions.delete(key);this.sessions.set(real,live);
-        // Dời luôn hẹn giờ, nếu không nó fire trên key đã chết và session mới sống vô hạn.
+        // Move the timer too, or it fires on a dead key and the new session lives forever.
         const t=this.idleTimers.get(key);if(t)clearTimeout(t);this.idleTimers.delete(key);
         this.touch(real);
       }});

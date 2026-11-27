@@ -18,43 +18,43 @@ import { localMediaRoots, MEDIA_MIME } from '../views/localMedia';
 import { providerLabel } from '../ui/format';
 
 /**
- * Đường vào thứ ba: một web app THẬT, phục vụ qua HTTP trên máy chạy extension host và mở
- * thẳng trên LAN. Lý do tồn tại: webview của VS Code
- * Web nằm trong iframe `*.vscode-cdn.net` kèm service worker và WebKit trên iPhone không chạy
- * nổi cái đó — panel đen thui. Trang này không phải webview nên không dính gì tới chỗ đó.
+ * The third way in: a REAL web app, served over HTTP from the machine running the extension host and opened
+ * directly on the LAN. Why it exists: VS Code
+ * Web's webview lives in a `*.vscode-cdn.net` iframe with a service worker, and WebKit on iPhone can't
+ * run that — the panel stays black. This page is not a webview, so none of that applies.
  *
- * Nó nói ĐÚNG protocol của `chat.js` (host <-> webview), chỉ đổi ống dẫn: SSE xuống,
- * POST lên. Nhờ vậy dùng lại nguyên bộ renderer thay vì nuôi hai cái vẽ transcript.
- * Gotcha: mọi thay đổi protocol ở `chatPanelProvider` phải soi lại file này — hai host,
- * một client.
+ * It speaks EXACTLY `chat.js`'s protocol (host <-> webview), only the pipe changes: SSE down,
+ * POST up. That way the same renderer is reused instead of maintaining two transcript renderers.
+ * Gotcha: every protocol change in `chatPanelProvider` must be checked against this file — two hosts,
+ * one client.
  */
 
 const PERM_TIMEOUT_MS=5*60*1000;
 const ASK_TIMEOUT_MS=60*60*1000;
 const ATTACHMENT_TTL_MS=48*60*60*1000;
 const PRUNE_EVERY_MS=6*60*60*1000;
-// SSE chết lặng khi proxy cắt giữa chừng; ping giữ ống mở và cho client biết mình còn sống.
+// SSE dies silently when a proxy cuts it midway; pings keep the pipe open and tell the client we're alive.
 const PING_MS=25*1000;
 const MAX_BODY=16*1024*1024;
-/** Mở session (và mỗi lần SSE nối lại sau khi iOS ẩn tab) gửi nguyên buffer: đo được 0,8-1,5 MB
- *  JSON không nén và 1.500 dòng DOM vẽ lại từ đầu. Điện thoại chỉ nhận đuôi, cũ hơn thì bấm tải thêm. */
+/** Opening a session (and every SSE reconnect after iOS hides the tab) sent the whole buffer: measured 0.8-1.5 MB
+ *  of uncompressed JSON and 1,500 DOM rows redrawn from scratch. The phone only gets the tail; older ones load on tap. */
 const MOBILE_PAGE=200;
-// Provider có thể khai id thật trước khi `manager.start()` trả về. Giữ alias ngắn hạn
-// để mobile không cầm pending id rồi reconnect vào một session "đã mất".
+// A provider may declare the real id before `manager.start()` returns. Keep a short-lived alias
+// so mobile doesn't hold the pending id and reconnect into a "lost" session.
 const REKEY_ALIAS_TTL_MS=5*60*1000;
-// Mở session là chấp nhận bản git mới hơn 2s — khỏi chạy lại `git` cho mỗi lần chọn.
+// Opening a session accepts a git result up to 2s old — no need to rerun `git` on every pick.
 const SCM_MAX_AGE_MS=2000;
 /**
- * ĐÚNG 4 số, HOẶC từ 8 ký tự không trắng. Bàn số tự gửi khi đủ 4, nên nới nhánh số mà không
- * sửa bàn số là đặt một passcode không bao giờ gõ vào được — export ra để test khoá hai thứ
- * đi cùng nhau. Nhánh dài dành cho máy phơi trang này ra ngoài LAN, và nó bắt buộc phải có ô
- * nhập chữ: `keypad()` chọn mặt trang theo passcode đang set, không theo setting riêng.
+ * EXACTLY 4 digits, OR 8+ non-space characters. The keypad auto-submits at 4, so widening the digit branch without
+ * changing the keypad sets a passcode that can never be typed — exported so tests lock the two
+ * together. The long branch is for machines exposing this page beyond the LAN, and it requires a text
+ * input: `keypad()` picks the page variant from the passcode in use, not from a separate setting.
  */
 export const PASSCODE_RE=/^(?:\d{4}|\S{8,128})$/;
-/** Bàn số chỉ gõ được nhánh 4 số; passcode dài phải ra ô nhập + nút gửi. */
+/** The keypad can only type the 4-digit branch; a long passcode needs an input + submit button. */
 export const isPinPasscode=(v:string)=>/^\d{4}$/.test(v);
-// 4 chữ số là 10.000 tổ hợp và cánh cửa này mở ra một cái shell: lockout LÀ lớp phòng vệ,
-// không phải phần trang trí. Sai quá ngưỡng thì chờ, và thời gian chờ nhân đôi mỗi lần.
+// 4 digits are 10,000 combinations and this door opens onto a shell: lockout IS the defence,
+// not decoration. Past the threshold you wait, and the wait doubles each time.
 const LOGIN_FREE_TRIES=5;
 const LOGIN_BASE_LOCK_MS=30*1000;
 const LOGIN_MAX_LOCK_MS=15*60*1000;
@@ -62,20 +62,20 @@ const TOKEN_FILE='mobile-token';
 const EXT:Record<string,string>={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp'};
 const COOKIE='devhub_mobile';
 /**
- * Panel webview chạy dưới `default-src 'none'` + nonce; trang HTTP này trước đó KHÔNG có
- * CSP nào, tức front-end thứ hai thiếu sạch lớp phòng vệ của cái thứ nhất. Mọi thứ nó nạp
- * đều same-origin (`/assets/*`, `/api/file`, EventSource `/api/stream`, fetch `/api/*`) nên
- * `'self'` là đủ — KHÔNG cần `'unsafe-inline'`: markup không có `style=` nào và css không có
- * `url()` nào. `data:` chỉ mở cho ảnh.
+ * The webview panel runs under `default-src 'none'` + nonce; this HTTP page used to have NO
+ * CSP at all, i.e. the second front-end lacked every defence of the first. Everything it loads
+ * is same-origin (`/assets/*`, `/api/file`, EventSource `/api/stream`, fetch `/api/*`) so
+ * `'self'` is enough — NO `'unsafe-inline'` needed: the markup has no `style=` and the css has no
+ * `url()`. `data:` is only opened for images.
  */
 const CSP="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; "
   +"connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /**
- * IPv4 LAN của máy này để dựng link cho điện thoại. CHỈ dải private (RFC1918) —
- * bản cũ có fallback "địa chỉ nào không phải link-local", tức là một máy có IP public
- * hoặc đang cắm VPN sẽ được phát ra một URL công khai kèm token. Không có thì trả rỗng,
- * caller tự lùi về loopback.
+ * This machine's LAN IPv4, to build the link for the phone. Private ranges ONLY (RFC1918) —
+ * the old version fell back to "any non-link-local address", meaning a machine with a public IP
+ * or on a VPN would hand out a public URL with a token. Returns empty if none;
+ * the caller falls back to loopback.
  */
 const PRIVATE_V4=/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
 export function lanAddress():string{
@@ -90,13 +90,13 @@ export function lanAddress():string{
 
 interface Draft {workspace:DevHubWorkspace;project:DevHubProject;provider:ProviderId;}
 interface QueuedPrompt {text:string;images?:string[];}
-/** Một client = một tab trình duyệt. Tương đương `Tab` của panel, chỉ khác chỗ đổ ra. */
+/** One client = one browser tab. The equivalent of the panel's `Tab`, only the output differs. */
 interface Client {
   id:string;res:any;session?:DevHubSession;draft?:Draft;workspace?:DevHubWorkspace;project?:DevHubProject;
   model?:string;effort?:string;queue:QueuedPrompt[];batcher:EventBatcher<any>;starting?:boolean;flushing?:boolean;
-  /** Hai POST là hai request; không nối đuôi thì handler của chúng đan vào nhau giữa các await. */
+  /** Two POSTs are two requests; without chaining, their handlers interleave between awaits. */
   chain:Promise<any>;
-  /** Số event cuối đang cho xem của session `key`; đổi session (kể cả rekey) là về lại MOBILE_PAGE. */
+  /** Number of trailing events shown for session `key`; switching session (rekey included) resets to MOBILE_PAGE. */
   shown?:{key:string;n:number};
 }
 
@@ -108,16 +108,16 @@ export interface MobileServerDeps {
   findSession:(provider:string,id:string)=>Promise<DevHubSession|undefined>;
   answerPermission:(provider:string,sessionId:string,requestId:string,allow:boolean,updatedInput?:any)=>void;
   onSelection?:(s:DevHubSession)=>void;
-  /** Tree hỏi `isAwaitingPermission` lúc vẽ, nên phải được đánh thức khi câu hỏi hiện ra
-   *  và khi nó được trả lời — trang mobile duyệt được mà panel thì không thấy gì. */
+  /** The tree asks `isAwaitingPermission` while drawing, so it must be woken when a question appears
+   *  and when it is answered — the mobile page can approve while the panel sees nothing. */
   onChanged?:()=>void;
   storageDir:string;
-  /** Đọc lúc gọi, không chụp một lần: người dùng đổi setting mà không reload window vẫn phải ăn. */
+  /** Read at call time, not captured once: a user changing the setting without reloading the window must still take effect. */
   passcode:()=>string;
   log?:(line:string)=>void;
-  /** Chung một cache git với panel: cùng repo thì cùng một lần chạy `git`. */
+  /** Shares one git cache with the panel: the same repo means a single `git` run. */
   gitWatcher?:GitStatusWatcher;
-  /** Acc Claude theo project. `label` trả `undefined` = chưa đặt `altAccountFile`, tính năng ẩn. */
+  /** Claude account per project. `label` returning `undefined` = `altAccountFile` not set, feature hidden. */
   accounts?:{label:(root:string)=>string|undefined;toggle:(root:string,name:string)=>Promise<{level:'info'|'warn'|'error';message:string}>};
 }
 
@@ -125,7 +125,7 @@ export class MobileServer {
   private server:any;
   private clients=new Map<string,Client>();
   private buffers=new SessionEventCache<DevHubEvent>(12,1500);
-  /** key -> số event đầu buffer đến từ `loadTranscript`; xem `mergeTranscript`. */
+  /** key -> number of events at the start of the buffer that came from `loadTranscript`; see `mergeTranscript`. */
   private historyLen=new Map<string,number>();
   private disposers:Array<()=>void>=[];
   private pendingPerms=new Map<string,{provider:string;sessionId:string;timer:any;input?:any;req:any}>();
@@ -141,16 +141,16 @@ export class MobileServer {
 
   async start(port:number,bindLan=false):Promise<{port:number;token:string}>{
     if(this.port)return {port:this.port,token:this.token};
-    // Không có passcode thì không có cửa nào cả: `?t=` đã bỏ, mở port nữa là mở shell cho cả LAN.
+    // No passcode means no door at all: `?t=` is gone, so opening the port would open a shell to the whole LAN.
     if(!PASSCODE_RE.test(String(this.deps.passcode()||'')))
       throw new Error('set devHub.mobile.passcode (exactly 4 digits, or 8+ non-space characters) before serving the page');
     this.token=this.loadToken();
     this.server=http.createServer((req:any,res:any)=>{this.route(req,res).catch((e:any)=>this.fail(res,500,e?.message||String(e)));});
     await new Promise<void>((resolve,reject)=>{
       this.server.once('error',reject);
-      // `bindLan` mới mở ra ngoài loopback (điện thoại cùng Wi-Fi phải gọi tới được). Cả LAN
-      // chạm được một endpoint chạy CLI, và token đi qua HTTP thường nên ai bắt được gói là
-      // có nó — `devHub.mobile.lan` là chỗ tắt, đừng bật ở Wi-Fi lạ.
+      // `bindLan` is what opens it beyond loopback (a phone on the same Wi-Fi must reach it). The whole LAN
+      // can reach an endpoint that runs a CLI, and the token travels over plain HTTP so anyone sniffing packets
+      // gets it — `devHub.mobile.lan` is the off switch; don't turn it on on unknown Wi-Fi.
       this.server.listen(port,bindLan?'0.0.0.0':'127.0.0.1',()=>{this.server.off('error',reject);resolve();});
     });
     this.port=this.server.address().port;
@@ -161,13 +161,13 @@ export class MobileServer {
     );
     const git=this.deps.gitWatcher;
     if(git)this.disposers.push(
-      // Client SSE đang nối = có người nhìn repo đó; rớt mạng thì client biến mất và git nghỉ.
+      // A connected SSE client = someone is looking at that repo; if the network drops the client disappears and git rests.
       git.addSource(()=>[...this.clients.values()].filter(c=>c.project?.gitRoot)
         .map(c=>({root:c.project!.gitRoot!,hot:c.session?.status==='running'}))),
       git.on((root,status)=>{for(const c of this.clients.values())if(c.project?.gitRoot===root)this.post(c,{type:'scm',status});}),
     );
     void this.pruneAttachments();
-    // Quét một lần lúc start là TTL 48h không bao giờ được thi hành trên host chạy dài.
+    // Sweeping only once at start means the 48h TTL is never enforced on a long-running host.
     this.pruneTimer=setInterval(()=>void this.pruneAttachments(),PRUNE_EVERY_MS);
     this.pruneTimer.unref?.();
     return {port:this.port,token:this.token};
@@ -186,8 +186,8 @@ export class MobileServer {
   }
 
   /**
-   * Token là giá trị của cookie, và nó phải SỐNG QUA restart: mint mới mỗi lần activate nghĩa là
-   * mọi PWA/bookmark đã đăng nhập bị đá ra sau mỗi Reload Window. 0600 vì đây là bí mật.
+   * The token is the cookie's value, and it must SURVIVE restarts: minting a new one on every activate means
+   * every signed-in PWA/bookmark gets kicked out after each Reload Window. 0600 because it is a secret.
    */
   private tokenPath(){return nodePath.join(this.deps.storageDir,TOKEN_FILE);}
   private loadToken():string{
@@ -203,14 +203,14 @@ export class MobileServer {
         fsSync.writeFileSync(this.tokenPath(),token,{mode:0o600});}catch{}
     return token;
   }
-  /** Huỷ mọi thiết bị đã đăng nhập: cookie cũ trỏ tới token cũ, không còn khớp gì. */
+  /** Revokes every signed-in device: old cookies point at the old token and match nothing. */
   rotateToken(){const t=this.writeToken();if(this.port)this.token=t;return t;}
 
   // ---------- HTTP ----------
   private fail(res:any,code:number,message:string){
     try{res.writeHead(code,{'Content-Type':'text/plain; charset=utf-8'});res.end(message);}catch{}
   }
-  /** Chỉ còn cookie: token không bao giờ đi qua URL nữa (xem `login`). */
+  /** Cookie only: the token never travels in a URL any more (see `login`). */
   private authed(req:any){
     if(!this.token)return false;
     const cookie=String(req.headers?.cookie||'').split(';').map((s:string)=>s.trim())
@@ -218,19 +218,19 @@ export class MobileServer {
     const mine=Buffer.from(this.token);
     for(const candidate of [cookie]){
       if(typeof candidate!=='string')continue;
-      // So theo BYTE: chuỗi đa byte cùng độ dài ký tự vẫn khác độ dài buffer, và
-      // timingSafeEqual ném RangeError chứ không trả false.
+      // Compare by BYTE: multi-byte strings with the same character length still differ in buffer length, and
+      // timingSafeEqual throws RangeError instead of returning false.
       const buf=Buffer.from(candidate);
       if(buf.length===mine.length&&crypto.timingSafeEqual(buf,mine))return true;
     }
     return false;
   }
   /**
-   * DNS rebinding + CSRF. Token và cookie đã chặn được đường này (cookie gắn theo origin là
-   * IP, trang lạ không đọc nổi), nhưng chốt ở Origin thì đóng hẳn về cấu trúc và rẻ.
-   * CHỈ so khi trình duyệt có gửi Origin — client không phải browser thì không gửi.
-   * Không dùng allowlist theo Host: qua tunnel thì Host là tên của tunnel, chặn cứng là
-   * chặn luôn cách dùng mà docs/DESIGN.md hứa. `x-forwarded-host` để proxy ghi lại Host vẫn qua.
+   * DNS rebinding + CSRF. The token and cookie already block this path (the cookie is bound to an origin that is
+   * an IP, a foreign page can't read it), but checking Origin closes it structurally and cheaply.
+   * ONLY compared when the browser sends an Origin — non-browser clients don't.
+   * No Host allowlist: through a tunnel the Host is the tunnel's name, and blocking it would
+   * block the very usage docs/DESIGN.md promises. `x-forwarded-host` still passes for proxies that rewrite Host.
    */
   private sameOrigin(req:any):boolean{
     const origin=String(req.headers?.origin||'');
@@ -242,10 +242,10 @@ export class MobileServer {
     const parsed=new URL(req.url,'http://127.0.0.1');
     const path=parsed.pathname;
     if(!this.sameOrigin(req))return this.fail(res,403,'Dev Hub: cross-origin request refused.');
-    // Cửa duy nhất, và nó phải đứng TRƯỚC hàng rào auth — chưa có cookie thì mới cần nó.
+    // The only door, and it must stand BEFORE the auth fence — it is only needed when there is no cookie yet.
     if(path==='/api/login'&&req.method==='POST')return this.login(req,res);
     if(!this.authed(req)){
-      // Chỉ trang gốc được thấy bàn số; mọi thứ khác vẫn 401 trần, không hé ra UI nào.
+      // Only the root page may show the keypad; everything else stays a bare 401, revealing no UI.
       if(path==='/'||path==='/index.html')return this.keypad(res);
       return this.fail(res,401,'Dev Hub: bad or missing token.');
     }
@@ -267,15 +267,15 @@ export class MobileServer {
       const body=await this.readBody(req);
       this.json(res,{ok:true});
       if(this.duplicate(body))return;
-      // Nối đuôi theo client: openSession có nhiều await, sendPrompt tới giữa chừng sẽ thấy
-      // client còn trắng và bị vứt kèm "Pick a session first".
+      // Chained per client: openSession has several awaits, and a sendPrompt arriving midway would find
+      // the client still blank and be dropped with "Pick a session first".
       client.chain=client.chain.then(()=>this.handleMessage(client,body),()=>this.handleMessage(client,body));
       await client.chain;
       return;
     }
     return this.fail(res,404,'not found');
   }
-  /** `__id` do bridge gắn; chỉ dùng làm khoá chống trùng, không tham gia validate nội dung. */
+  /** `__id` is attached by the bridge; only used as a dedupe key, not part of content validation. */
   private duplicate(body:any):boolean{
     const id=typeof body?.__id==='string'&&body.__id.length<=64?body.__id:'';
     if(!id)return false;
@@ -298,10 +298,10 @@ export class MobileServer {
     });
   }
   /**
-   * iOS 17.4+ chạy home-screen web app theo manifest; chỉ có `apple-mobile-web-app-capable`
-   * là đường legacy. KHÔNG khai `icons`: không có file ảnh nào để trỏ tới, và một entry chết
-   * còn tệ hơn để iOS tự lấy screenshot. `background_color` chỉ tô splash và manifest không
-   * media-query được — chọn tối vì đó là nền của một tool dev.
+   * iOS 17.4+ runs home-screen web apps from the manifest; `apple-mobile-web-app-capable` alone
+   * is the legacy path. NO `icons` declared: there is no image file to point at, and a dead entry
+   * is worse than letting iOS take a screenshot. `background_color` only paints the splash and a manifest can't
+   * media-query — dark is chosen because that is a dev tool's background.
    */
   private manifest(res:any){
     return this.text(res,JSON.stringify({name:'Dev Hub',short_name:'Dev Hub',start_url:'/',scope:'/',
@@ -309,8 +309,8 @@ export class MobileServer {
   }
   private assetDir(){return nodePath.join(__dirname,'..','..','..','..','media','mobile');}
   /**
-   * PWA trên iPhone không nạp lại trang khi server restart — chỉ SSE nối lại, JS cũ chạy tiếp với
-   * server mới. `hello` mang id này; bridge thấy lệch với id nhúng trong trang thì tự reload.
+   * A PWA on iPhone doesn't reload the page when the server restarts — only SSE reconnects, and old JS keeps running against
+   * the new server. `hello` carries this id; when the bridge sees it differs from the id embedded in the page it reloads itself.
    */
   private buildId(){return this.build??=crypto.createHash('sha1').update(webviewAssets().script).update(webviewAssets().css)
     .update(['bridge.js','mobile.css'].map(n=>{try{return fsSync.readFileSync(nodePath.join(this.assetDir(),n),'utf8');}catch{return '';}}).join('\0')).digest('hex').slice(0,12);}
@@ -329,17 +329,17 @@ export class MobileServer {
   private text(res:any,body:string,type:string){
     res.writeHead(200,{'Content-Type':`${type}; charset=utf-8`,'Cache-Control':'no-store'});res.end(body);
   }
-  /** Ảnh người dùng đính kèm và media agent nhắc tới (`localMediaRoots`). */
+  /** Images the user attached and media the agent mentions (`localMediaRoots`). */
   private imageRoots(){return [this.attachmentDir(),...localMediaRoots()].flatMap(r=>{const raw=nodePath.resolve(r);try{return [raw,fsSync.realpathSync(r)];}catch{return [raw];}});}
-  /** `p` = base64url (bridge, ảnh đính kèm); `f` = đường dẫn thô (media trong câu trả lời, chat.js tự nối). */
+  /** `p` = base64url (bridge, attached images); `f` = a raw path (media in replies, joined by chat.js). */
   private serveFile(req:any,res:any,q:any){
     let p=q.get('f')||'';
     if(!p)try{p=Buffer.from(q.get('p')||'','base64url').toString('utf8');}catch{return this.fail(res,400,'bad path');}
-    // `startsWith` trần cho phép `/root-evil` lọt qua vì cùng tiền tố; phải chốt ở dấu ngăn.
+    // A bare `startsWith` lets `/root-evil` through because it shares the prefix; anchor on the separator.
     const roots=this.imageRoots();
     const allowed=(f:string)=>!!MEDIA_MIME[nodePath.extname(f).toLowerCase()]&&roots.some(root=>f===root||f.startsWith(root+nodePath.sep));
-    // Chốt hai lần: trước realpath để path ngoài gốc không lộ có/không tồn tại (403, không phải 404);
-    // sau realpath vì gốc giờ gồm cả `~` — một `x.png` symlink sang `~/.ssh/id_rsa` phải chết ở đây.
+    // Checked twice: before realpath so a path outside the roots doesn't reveal whether it exists (403, not 404);
+    // after realpath because the roots now include `~` — an `x.png` symlinked to `~/.ssh/id_rsa` must die here.
     if(!allowed(nodePath.resolve(p)))return this.fail(res,403,'not a media file inside the media roots');
     let resolved='';
     try{resolved=fsSync.realpathSync(nodePath.resolve(p));}catch{return this.fail(res,404,'gone');}
@@ -347,8 +347,8 @@ export class MobileServer {
     const type=MEDIA_MIME[nodePath.extname(resolved).toLowerCase()];
     let size=0;
     try{const st=fsSync.statSync(resolved);if(!st.isFile())return this.fail(res,404,'gone');size=st.size;}catch{return this.fail(res,404,'gone');}
-    // Safari không phát <video> nếu server không trả 206 cho Range — kể cả file nhỏ.
-    // Ảnh tool đặt tên theo sha1 nội dung ⇒ không bao giờ đổi, cache hẳn; file khác agent có thể ghi đè cùng tên.
+    // Safari won't play <video> unless the server answers Range with 206 — even for small files.
+    // Tool images are named by content sha1 ⇒ they never change, cache them for good; other files may be overwritten by the agent under the same name.
     const hashed=[toolImageDir(),...(()=>{try{return [fsSync.realpathSync(toolImageDir())];}catch{return [];}})()].some(d=>resolved.startsWith(d+nodePath.sep));
     const head:any={'Content-Type':type,'Accept-Ranges':'bytes','Cache-Control':hashed?'private, max-age=31536000, immutable':'private, max-age=600'};
     const m=/^bytes=(\d*)-(\d*)$/.exec(String(req.headers?.range||''));
@@ -366,29 +366,29 @@ export class MobileServer {
       +`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">`
       +`<meta name="referrer" content="no-referrer">`
       +`<meta name="apple-mobile-web-app-capable" content="yes">`
-      // `default`, KHÔNG `black-translucent`: iOS 26+ phủ blur hệ thống lên status bar của web app
-      // translucent và trang không tắt được. `default` cho canvas bắt đầu dưới status bar; màu
-      // thanh lấy từ `.ios-top-edge` (mobile.css). iOS chỉ đọc meta này lúc Add to Home ⇒ icon
-      // cũ phải xoá rồi thêm lại.
+      // `default`, NOT `black-translucent`: iOS 26+ lays a system blur over the status bar of a translucent
+      // web app and the page can't turn it off. `default` makes the canvas start below the status bar; the bar
+      // colour comes from `.ios-top-edge` (mobile.css). iOS only reads this meta at Add to Home ⇒ the old icon
+      // must be removed and added again.
       +`<meta name="apple-mobile-web-app-status-bar-style" content="default">`
-      // Phải khớp `--vscode-sideBar-background` của mobile.css: đây là màu Chrome/Android tô
-      // quanh trang, và manifest không media-query được nên hai dòng này gánh cả sáng lẫn tối.
+      // Must match `--vscode-sideBar-background` in mobile.css: this is the colour Chrome/Android paints
+      // around the page, and a manifest can't media-query so these two lines carry both light and dark.
       +`<meta name="theme-color" content="#f6f6f6" media="(prefers-color-scheme: light)">`
       +`<meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">`
-      // `use-credentials` là BẮT BUỘC: manifest mặc định fetch với credentials "omit", mà
-      // trang này chỉ mở cho ai có cookie token → không có nó là 401, iOS lặng lẽ bỏ manifest.
+      // `use-credentials` is REQUIRED: the manifest is fetched with credentials "omit" by default, and
+      // this page only opens for holders of the token cookie → without it it's a 401 and iOS quietly drops the manifest.
       +`<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">`
       +`<link rel="stylesheet" href="/assets/chat.css"><link rel="stylesheet" href="/assets/mobile.css">`
       +`</head><body><div class="ios-top-edge" aria-hidden="true"></div>${chatBodyMarkup()}<div id="sheet" hidden></div>`
-      // bridge PHẢI chạy trước: `chat.js` gọi acquireVsCodeApi() ngay dòng 1.
+      // the bridge MUST run first: `chat.js` calls acquireVsCodeApi() on line 1.
       +`<script src="/assets/bridge.js"></script><script src="/assets/chat.js"></script></body></html>`;
   }
 
   /**
-   * Đăng nhập bằng passcode thay cho token trong URL. Lý do đổi: token mint mỗi lần activate
-   * nên link đã lưu chết sau mỗi Reload Window, và Add to Home Screen trên iOS bỏ mất query
-   * string — PWA không bao giờ có được token. Cookie thì PWA giữ được, nên chỉ cần một cửa
-   * để lấy cookie.
+   * Sign in with a passcode instead of a token in the URL. Why it changed: the token was minted on every activate
+   * so saved links died after each Reload Window, and Add to Home Screen on iOS drops the query
+   * string — a PWA could never get the token. A PWA does keep cookies, so all that's needed is one door
+   * to get the cookie.
    */
   private async login(req:any,res:any){
     const who=String(req.socket?.remoteAddress||'?');
@@ -399,7 +399,7 @@ export class MobileServer {
     try{code=String((await this.readBody(req))?.code??'');}catch{}
     const want=String(this.deps.passcode()||'');
     const a=Buffer.from(code),b=Buffer.from(want);
-    // Độ dài khác nhau là timingSafeEqual NÉM chứ không trả false; chốt độ dài trước.
+    // Different lengths make timingSafeEqual THROW rather than return false; check the length first.
     const ok=PASSCODE_RE.test(want)&&a.length===b.length&&crypto.timingSafeEqual(a,b);
     if(!ok){
       const st=this.attempts.get(who)||{n:0,until:0};st.n++;
@@ -419,15 +419,15 @@ export class MobileServer {
   private lockedFor(who:string){const st=this.attempts.get(who);return st?Math.max(0,st.until-Date.now()):0;}
 
   /**
-   * Hai mặt trang, chọn theo passcode đang set — không có setting riêng cho mặt trang.
-   * Nhánh 4 số: bàn số vẽ bằng `<button>`, KHÔNG có `<input>` nào — cố ý, vì trong web app cài
-   * ra home screen của iOS tap vào text field không focus và không mở bàn phím (WebKit).
-   * Nhánh passcode dài thì buộc phải có ô nhập, nên nó dựa vào `autofocus` lúc parse HTML cộng
-   * một lần `focus()` NGAY TRONG tap handler của nút Unlock — cách duy nhất WebKit chịu mở bàn
-   * phím. CHƯA verify trên iPhone thật: hỏng thì hạ passcode về 4 số, mặt bàn số quay lại ngay,
-   * không phải cài lại extension.
-   * Script/style inline theo nonce vì CSP của trang không cho `'unsafe-inline'`, và asset ở
-   * `/assets/*` thì vẫn nằm sau hàng rào auth nên trang này không gọi tới được.
+   * Two page variants, chosen by the passcode in use — there's no separate setting for the variant.
+   * The 4-digit branch: a keypad drawn with `<button>`s, with NO `<input>` — on purpose, because in a web app installed
+   * to the iOS home screen tapping a text field doesn't focus it or open the keyboard (WebKit).
+   * The long passcode branch must have an input, so it relies on `autofocus` at HTML parse time plus
+   * one `focus()` RIGHT INSIDE the Unlock button's tap handler — the only way WebKit agrees to open the
+   * keyboard. NOT verified on a real iPhone: if it breaks, drop the passcode back to 4 digits and the keypad returns at once,
+   * no extension reinstall needed.
+   * Inline script/style use a nonce because the page's CSP doesn't allow `'unsafe-inline'`, and assets under
+   * `/assets/*` are still behind the auth fence so this page can't reach them.
    */
   private keypad(res:any){
     const pin=isPinPasscode(String(this.deps.passcode()||''));
@@ -438,7 +438,7 @@ export class MobileServer {
       +`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">`
       +`<meta name="referrer" content="no-referrer">`
       +`<meta name="apple-mobile-web-app-capable" content="yes">`
-      // Cùng lý do với `html()`: `default` + `.ios-top-edge` thay cho blur của translucent.
+      // Same reason as `html()`: `default` + `.ios-top-edge` instead of translucent's blur.
       +`<meta name="apple-mobile-web-app-status-bar-style" content="default">`
       +`<meta name="theme-color" content="#f6f6f6" media="(prefers-color-scheme: light)">`
       +`<meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">`
@@ -469,8 +469,8 @@ export class MobileServer {
       +`button.wide{width:258px;height:52px;border-radius:12px;font-size:17px}`
       +`</style></head><body><div class="ios-top-edge" aria-hidden="true"></div>`
       +`<h1>Dev Hub</h1><div id="dots"></div><div id="msg"></div>`
-      // `autofocus` phải nằm trong HTML lúc parse: gắn thuộc tính này vào element tạo bằng
-      // createElement thì WebKit bỏ qua, và ô nhập sẽ không bao giờ tự mở bàn phím.
+      // `autofocus` must be in the HTML at parse time: set on an element created with
+      // createElement, WebKit ignores it and the input will never open the keyboard by itself.
       +(pin?``:`<input id="pw" type="password" autocapitalize="off" autocorrect="off" spellcheck="false"`
         +` enterkeyhint="go" autofocus placeholder="Passcode">`
         +`<button id="go" class="wide">Unlock</button>`)
@@ -487,8 +487,8 @@ export class MobileServer {
       +`msg.textContent=x.retryAfter?('Too many tries \u2014 wait '+x.retryAfter+'s'):'Wrong code';`
       +`code='';busy=false;clear();});})`
       +`.catch(function(){msg.textContent='No answer from the server';code='';busy=false;clear();});}`
-      // Gõ sai xong phải xoá ô nhập rồi focus lại: không thì lần thử sau nối vào chuỗi cũ và
-      // đốt thêm một lần của rate-limit mà người gõ không hiểu vì sao.
+      // After a wrong entry, clear the input and refocus: otherwise the next attempt appends to the old string and
+      // burns another rate-limit attempt without the user understanding why.
       +`function clear(){draw();if(pin)return;var i=document.getElementById('pw');if(!i)return;i.value='';i.focus();}`
       +`function push(n){if(busy||code.length>=4)return;msg.textContent='';code+=n;draw();if(code.length>=4)send();}`
       +`if(pin){for(var k=1;k<=9;k++)(function(n){var b=document.createElement('button');b.textContent=String(n);`
@@ -497,8 +497,8 @@ export class MobileServer {
       +`del.onclick=function(){if(busy)return;code=code.slice(0,-1);draw();};pad.appendChild(del);`
       +`var zero=document.createElement('button');zero.textContent='0';zero.onclick=function(){push('0');};pad.appendChild(zero);`
       +`var pad3=document.createElement('span');pad.appendChild(pad3);draw();}`
-      // Passcode dài thì server không biết độ dài để tự gửi ⇒ phải có nút gửi. Ô rỗng mà bấm
-      // Unlock thì chỉ focus: đó là lần focus duy nhất nằm trong tap handler thật của iOS.
+      // With a long passcode the server can't know the length to auto-submit ⇒ a submit button is needed. Tapping
+      // Unlock with an empty input only focuses: that's the one focus that happens inside a real iOS tap handler.
       +`else{var inp=document.getElementById('pw'),go=document.getElementById('go');`
       +`go.onclick=function(){if(busy)return;var v=inp.value||'';if(!v){inp.focus();return;}`
       +`msg.textContent='';code=v;send();};`
@@ -518,7 +518,7 @@ export class MobileServer {
     client.batcher=new EventBatcher<any>(items=>this.post(client,{type:'eventBatch',items:coalesceSessionDeltas(items)}),40);
     this.clients.set(id,client);
     this.send(client,{type:'hello',clientId:id,build:this.buildId()});
-    // Ở đây chứ không chỉ ở `ready`: SSE nối lại không gửi `ready`, nhưng client mới thì luôn qua đây.
+    // Here and not only on `ready`: an SSE reconnect doesn't send `ready`, but a new client always passes through here.
     this.send(client,{type:'mediaBase',base:'/api/file?f='});
     const ping:any=setInterval(()=>{try{res.write(': ping\n\n');}catch{}},PING_MS);
     ping.unref?.();
@@ -527,7 +527,7 @@ export class MobileServer {
       if(this.clients.get(id)!==client)return;
       this.clients.delete(id);
       client.batcher.dispose();
-      // CLI chặn tới khi có control_response: tab đóng mà không deny thì lượt treo mãi.
+      // The CLI blocks until a control_response: a tab closing without a deny leaves the turn hanging forever.
       if(client.session)this.denyPermsFor(client.session.provider,client.session.nativeSessionId);
     };
     req.on('close',close);req.on('error',close);
@@ -535,7 +535,7 @@ export class MobileServer {
   private send(client:Client,payload:any){
     try{client.res.write(`data: ${JSON.stringify(payload)}\n\n`);}catch{}
   }
-  /** Cùng chữ ký với `post` của panel để hai host đọc giống nhau. */
+  /** Same signature as the panel's `post` so the two hosts read alike. */
   private post(client:Client,message:any){this.send(client,message);}
 
   // ---------- state ----------
@@ -565,7 +565,7 @@ export class MobileServer {
     return {items:[]};
   }
 
-  /** Như panel: event ngoài lượt, và không được tạo buffer từ hư không. */
+  /** Like the panel: an event outside any turn, and it must not create a buffer out of nothing. */
   injectEvent(provider:string,nativeSessionId:string,event:DevHubEvent){
     const key=this.sessionKey(provider,nativeSessionId);
     if(this.buffers.get(key)?.length)this.buffers.append(key,event);
@@ -577,12 +577,12 @@ export class MobileServer {
     const session=client.session; if(!session)return;
     const key=this.sessionKey(session.provider,session.nativeSessionId);
     let events=this.buffers.get(key);
-    // Như panel: hàng task của planner đọc lại daemon mỗi lần mở, xem `rereadsTranscript`.
+    // Like the panel: planner task rows re-read the daemon on every open, see `rereadsTranscript`.
     const reread=!!events?.length&&rereadsTranscript(session)&&!this.deps.manager.isBusy(session.provider,session.nativeSessionId);
     if(!events?.length||reread){
       try{
-        // Ảnh Claude nằm trong prompt dưới dạng path (`withImages`); không tách ra thì
-        // trang điện thoại chỉ thấy mấy dòng đường dẫn trần, đúng lỗi panel đã sửa.
+        // Claude images sit in the prompt as paths (`withImages`); without splitting them out
+        // the phone page only sees a few bare path lines, the exact bug the panel already fixed.
         const loaded=(await this.deps.providers[session.provider].loadTranscript(session))
           .map((e:any)=>recoverImages(e,this.attachmentDir()+nodePath.sep));
         const merged=mergeTranscript(loaded,this.buffers.get(key)||[],reread?this.historyLen.get(key)||0:0,session.provider!=='planner');
@@ -602,7 +602,7 @@ export class MobileServer {
     this.refreshScm(client);
     this.replayPerms(client);
   }
-  /** Gửi bản cache ngay rồi mới đọc lại; `status` vắng = ẩn chip (project không phải repo). */
+  /** Send the cached result right away, then re-read; a missing `status` = hide the chip (the project isn't a repo). */
   private refreshScm(client:Client){
     const root=client.project?.gitRoot;
     this.post(client,{type:'scm',status:root?this.deps.gitWatcher?.get(root):undefined});
@@ -615,10 +615,10 @@ export class MobileServer {
     this.post(client,{type:'optionsChanged',model:client.model,effort:client.effort,provider,slash});
   }
   /**
-   * Hàng chờ thuộc về SESSION, không thuộc về tab SSE. Điện thoại rớt mạng là chuyện thường
-   * và `close` xoá client — trước đây mọi prompt đã gõ mà chưa gửi biến mất im lặng, dù
-   * `/api/msg` đã trả 200 cho nó. Cùng một mảng được gắn vào client, nên mọi push/splice sẵn
-   * có vẫn chạy nguyên xi và lần nối lại nhận đúng mảng đó.
+   * The queue belongs to the SESSION, not to the SSE tab. A phone dropping off the network is common
+   * and `close` deletes the client — previously every typed-but-unsent prompt vanished silently, even though
+   * `/api/msg` had returned 200 for it. The same array is attached to the client, so every existing push/splice
+   * still works unchanged and the reconnect receives that exact array.
    */
   private sessionQueues=new Map<string,QueuedPrompt[]>();
   private queueFor(session:DevHubSession):QueuedPrompt[]{
@@ -629,21 +629,21 @@ export class MobileServer {
   }
   private postQueue(client:Client){this.post(client,{type:'queue',items:client.queue.map(q=>({text:q.text,images:q.images?.length??0}))});}
 
-  /** Ảnh đi trong event dưới dạng ĐƯỜNG DẪN; chỉ lúc gửi mới đổi sang URL của server này. */
+  /** Images travel in events as PATHS; only when sending are they turned into this server's URLs. */
   private forWeb(event:any){
-    // data URI không có file để `/api/file` trỏ tới.
+    // A data URI has no file for `/api/file` to point at.
     const uri=(p:string)=>String(p).startsWith('data:')?String(p):`/api/file?p=${Buffer.from(String(p),'utf8').toString('base64url')}`;
     if(event?.type==='assistant_image'&&event.path)return {...event,src:uri(event.path)};
     if(event?.type==='user_message'&&event.images?.length)return {...event,imageSrcs:event.images.map(uri)};
     return event;
   }
 
-  // ---------- message từ client ----------
+  // ---------- messages from the client ----------
   private async handleMessage(client:Client,raw:any){
     try{
       const m:any=parseMobileMessage(raw);
       if(!m){
-        if(raw?.type==='pasteImage')this.post(client,{type:'attachmentError',requestId:raw.requestId,message:'Ảnh không hợp lệ hoặc vượt giới hạn 9 MiB.'});
+        if(raw?.type==='pasteImage')this.post(client,{type:'attachmentError',requestId:raw.requestId,message:'Invalid image or over the 9 MiB limit.'});
         return;
       }
       if(m.type==='ready'){
@@ -656,10 +656,10 @@ export class MobileServer {
         if(!session){this.post(client,{type:'error',message:'That session is gone.'});return;}
         const snap=await this.deps.lookup();
         const d=defaultTurnOptions(session.provider);
-        // Option chỉ giữ được trong cùng một provider: model của provider này không phải của provider kia.
+        // Options only carry over within one provider: one provider's models aren't another's.
         const sameProvider=(client.draft?.provider??client.session?.provider)===session.provider;
-        // Chọn lại đúng session đang mở (bridge làm thế mỗi lần nối lại) không được xoá hàng chờ
-        // — và hàng chờ của session KHÁC cũng còn nguyên chỗ của nó.
+        // Re-selecting the session already open (the bridge does this on every reconnect) must not clear the queue
+        // — and ANOTHER session's queue also stays where it is.
         Object.assign(client,{session,draft:undefined,queue:this.queueFor(session),
           workspace:snap.workspaces.find(w=>w.id===session.workspaceId),
           project:snap.projects.find(p=>p.id===session.projectId),
@@ -685,7 +685,7 @@ export class MobileServer {
         if(!project){this.post(client,{type:'error',message:'That project is gone.'});return;}
         if(!this.deps.accounts?.label(project.rootPath)){this.post(client,{type:'error',message:'Set devHub.claude.altAccountFile on the host first.'});return;}
         const r=await this.deps.accounts.toggle(project.rootPath,project.name);
-        // `error` là kênh hiện chữ duy nhất của chat.js; đổi thành công thì bridge tự mở lại sheet làm xác nhận.
+        // `error` is chat.js's only text channel; on a successful switch the bridge reopens the sheet as confirmation.
         if(r.level!=='info'){this.post(client,{type:'error',message:r.message});return;}
         this.post(client,{type:'accountSwitched',projectId:project.id,message:r.message});return;
       }
@@ -699,7 +699,7 @@ export class MobileServer {
       }
       if(m.type==='setOption'){
         if(m.kind==='model')client.model=m.value;else client.effort=m.value;
-        // Như panel: lựa chọn gắn với session nên mở lại ở đâu cũng thấy, kể cả chưa gửi lượt nào.
+        // Like the panel: the choice is tied to the session, so it shows wherever it is reopened, even before any turn.
         if(client.session)client.session=await this.deps.manager.setTurnOptions(client.session,{model:client.model,effort:client.effort});
         this.postOptions(client);return;
       }
@@ -711,7 +711,7 @@ export class MobileServer {
       if(m.type==='permissionResponse'){this.settlePerm(m.requestId,m.allow,m.answers,false,client);return;}
       if(m.type==='pasteImage'){
         try{await this.saveAttachment(client,m.mime,m.data,m.requestId);}
-        catch{this.post(client,{type:'attachmentError',requestId:m.requestId,message:'Không lưu được ảnh. Hãy chọn lại ảnh.'});}
+        catch{this.post(client,{type:'attachmentError',requestId:m.requestId,message:'Could not save the image. Please pick it again.'});}
         return;
       }
       if(m.type==='cancel'){
@@ -721,7 +721,7 @@ export class MobileServer {
       }
       if(m.type==='compact')return await this.compact(client);
       if(m.type==='sendPrompt')return await this.sendPrompt(client,m);
-      // `openFile`/`openLink`/`back`/`pick*` do bridge tự xử ở phía trình duyệt.
+      // `openFile`/`openLink`/`back`/`pick*` are handled by the bridge in the browser.
     }catch(e:any){this.post(client,{type:'error',message:e?.message||String(e)});}
   }
 
@@ -744,11 +744,11 @@ export class MobileServer {
       if(session.status==='running'||this.deps.manager.isBusy(session.provider,session.nativeSessionId)){
         client.queue.push({text,images});this.postQueue(client);return;
       }
-      // Như panel: `queue.length` không được là lý do xếp tiếp, nếu không một lần resume hỏng
-      // sẽ khoá hàng chờ vĩnh viễn (không có sessionUpdated nào để scheduleFlush bám vào).
+      // Like the panel: `queue.length` must not be a reason to keep queuing, or one failed resume
+      // locks the queue forever (there's no sessionUpdated for scheduleFlush to hook onto).
       let head:QueuedPrompt={text,images};
       if(client.queue.length){client.queue.push(head);head=client.queue.shift()!;this.postQueue(client);}
-      // Trang đã xoá ô nhập lúc gửi; gửi hỏng mà không trả tin vào hàng chờ là mất chữ.
+      // The page cleared the input on send; a failed send that doesn't put the message back in the queue loses the text.
       try{
         client.session=await this.deps.manager.resume(session,head.text,{model:client.model,effort:client.effort,images:head.images});
       }catch(e){client.queue.unshift(head);this.postQueue(client);throw e;}
@@ -757,10 +757,10 @@ export class MobileServer {
       return;
     }
     if(!client.draft){this.post(client,{type:'error',message:'Pick a session or a project first.'});return;}
-    // Enter hai lần trước khi session kịp sinh ra sẽ tạo hai session.
+    // Pressing Enter twice before the session exists would create two sessions.
     if(client.starting){client.queue.push({text,images});this.postQueue(client);return;}
-    // Lần start trước hỏng thì hàng chờ còn tin cũ và chưa có session nào để flush vào.
-    // Gửi thẳng tin mới là đảo thứ tự — xếp nó vào cuối rồi lấy đầu hàng ra chạy.
+    // If the previous start failed, the queue still holds the old message and there is no session to flush into yet.
+    // Sending the new message directly would reorder them — queue it at the end, then run the head of the queue.
     let head:QueuedPrompt={text,images};
     if(client.queue.length){client.queue.push(head);head=client.queue.shift()!;this.postQueue(client);}
     client.starting=true;
@@ -779,7 +779,7 @@ export class MobileServer {
     finally { client.starting=false; }
   }
 
-  /** Claude nén bằng slash command thật; planner không có nén. */
+  /** Claude compacts with a real slash command; the planner has no compaction. */
   private async compact(client:Client){
     const session=client.session;
     if(!session){this.post(client,{type:'error',message:'Nothing to compact yet — send a message first.'});return;}
@@ -792,7 +792,7 @@ export class MobileServer {
     this.post(client,{type:'error',message:`${providerLabel(session.provider)} sessions have no compaction.`});
   }
 
-  // ---------- ảnh đính kèm ----------
+  // ---------- attached images ----------
   private attachmentDir(){return nodePath.join(this.deps.storageDir||require('node:os').tmpdir(),'devhub','attachments');}
   private async saveAttachment(client:Client,mime:string,b64:string,requestId?:string){
     const dir=this.attachmentDir();
@@ -811,7 +811,7 @@ export class MobileServer {
     }catch{}
   }
 
-  // ---------- event từ manager ----------
+  // ---------- events from the manager ----------
   private sessionKey(p:string,id:string){return `sess:${p}:${id}`;}
   private rekeyedSession(provider:string,id:string):DevHubSession|undefined{
     const key=this.sessionKey(provider,id),hit=this.recentRekeys.get(key);
@@ -826,15 +826,15 @@ export class MobileServer {
       return;
     }
     this.buffers.append(key,x.event,(previous,next)=>previous?.type==='assistant_delta'&&next?.type==='assistant_delta'?{...next,text:previous.text+next.text}
-      // View frame sau CHỨA cả frame trước; giữ cả hai là nhân bản một câu trả lời 30 lần trong cache.
+      // A later view frame CONTAINS the previous one; keeping both duplicates one answer 30 times in the cache.
       :previous?.type==='assistant_view'&&next?.type==='assistant_view'?next:undefined);
     for(const c of this.clientsFor(x.provider,x.sessionId)){
       if(x.event.type==='assistant_delta')c.batcher.push({sessionId:x.sessionId,event:x.event});
       else{c.batcher.flush();this.post(c,{type:'event',sessionId:x.sessionId,event:this.forWeb(x.event)});}
     }
   }
-  // Stop chỉ giết lượt đang chạy: hàng chờ của session sống tiếp và `sessionUpdated`
-  // ('cancelled') flush nó — giống hệt panel, hai frontend dùng chung một hàng chờ.
+  // Stop only kills the running turn: the session's queue lives on and `sessionUpdated`
+  // ('cancelled') flushes it — exactly like the panel; both front-ends share one queue.
   private onSessionUpdated(s:DevHubSession){
     if(s.status!=='running')this.closePerms(s.provider,s.nativeSessionId,'the turn ended');
     for(const c of this.clientsFor(s.provider,s.nativeSessionId)){
@@ -844,8 +844,8 @@ export class MobileServer {
   }
   private onRekey(x:any){
     if(x?.provider&&x?.oldId&&x?.session){
-      // Alias chỉ mất khi có người tra đúng key đó; quét lúc thêm để map không phình theo
-      // số lần rekey của một server chạy dài.
+      // An alias is only removed when someone looks up that exact key; sweep on insert so the map doesn't grow with
+      // the number of rekeys on a long-running server.
       const now=Date.now();
       for(const [k,v] of this.recentRekeys)if(v.expiresAt<=now)this.recentRekeys.delete(k);
       this.recentRekeys.set(this.sessionKey(x.provider,x.oldId),{session:x.session,expiresAt:now+REKEY_ALIAS_TTL_MS});
@@ -856,8 +856,8 @@ export class MobileServer {
     for(const c of this.clientsFor(x.provider,x.oldId)){c.session=x.session;this.post(c,{type:'sessionUpdated',session:x.session});}
   }
   /**
-   * `SessionManager.consume` xoá session khỏi `active` trong `finally`, tức SAU khi phát
-   * `sessionUpdated`. Gửi ngay trong handler sẽ đụng `claim()` và bị từ chối, nên phải hoãn.
+   * `SessionManager.consume` removes the session from `active` in its `finally`, i.e. AFTER emitting
+   * `sessionUpdated`. Sending right inside the handler hits `claim()` and gets refused, so it must be deferred.
    */
   private scheduleFlush(client:Client){
     if(!client.queue.length||client.flushing)return;
@@ -881,13 +881,13 @@ export class MobileServer {
     }
   }
 
-  // ---------- duyệt quyền ----------
-  /** `false` = không client nào cầm session này; người gọi đi tiếp xuống panel. */
+  // ---------- permission approval ----------
+  /** `false` = no client holds this session; the caller moves on to the panel. */
   showPermission(provider:string,sessionId:string,req:any):boolean{
     const targets=this.clientsFor(provider,sessionId);
     if(!targets.length)return false;
     const id=String(req?.requestId||'');
-    // Không có requestId thì không trả lời được; nhận vào là để CLI chờ mãi.
+    // Without a requestId it can't be answered; accepting it would leave the CLI waiting forever.
     if(!id)return false;
     const ms=req.requiresUserInteraction||req.toolName==='AskUserQuestion'?ASK_TIMEOUT_MS:PERM_TIMEOUT_MS;
     const timer:any=setTimeout(()=>{const p=this.pendingPerms.get(id);if(p)this.closeCard(p,id,'expired');this.settlePerm(id,false,undefined,true);},ms);
@@ -900,9 +900,9 @@ export class MobileServer {
   private settlePerm(requestId:string,allow:boolean,answers?:Record<string,string>,expired?:boolean,from?:Client){
     const p=this.pendingPerms.get(requestId); if(!p)return;
     clearTimeout(p.timer);this.pendingPerms.delete(requestId);
-    // Cùng một session có thể đang mở trên nhiều máy. Ai bấm trước thì card ở những máy còn
-    // lại phải chết theo — không đóng thì chúng còn hỏi một câu đã có câu trả lời, và bấm
-    // tiếp chỉ ra `settlePerm` rỗng, im lặng.
+    // The same session may be open on several devices. Whoever taps first, the cards on the other
+    // devices must die with it — left open they keep asking a question that already has an answer, and tapping
+    // again only reaches an empty `settlePerm`, silently.
     if(!expired)for(const c of this.clientsFor(p.provider,p.sessionId))
       if(c!==from)this.post(c,{type:'permissionClosed',requestId,note:allow?'allowed on another device':'denied on another device'});
     if(expired)this.noteDenied(p.provider,p.sessionId,`${p.req?.displayName||p.req?.toolName||'A tool'} request expired without an answer and was denied.`);
@@ -910,7 +910,7 @@ export class MobileServer {
     this.deps.answerPermission(p.provider,p.sessionId,requestId,allow,updatedInput);
     this.deps.onChanged?.();
   }
-  /** Xem `ChatPanelProvider.isAwaitingPermission` — cùng câu hỏi, hai host. */
+  /** See `ChatPanelProvider.isAwaitingPermission` — the same question, two hosts. */
   isAwaitingPermission(provider:string,sessionId:string){
     for(const [,p] of this.pendingPerms)if(p.provider===provider&&p.sessionId===sessionId)return true;
     return false;
@@ -938,7 +938,7 @@ export class MobileServer {
   private denyPermsFor(provider:string,sessionId?:string){
     for(const [id,p] of [...this.pendingPerms])
       if(p.provider===provider&&(!sessionId||p.sessionId===sessionId)){
-        // Client khác vẫn đang cầm session này thì đừng deny hộ nó.
+        // Another client still holds this session, so don't deny on its behalf.
         if(this.clientsFor(p.provider,p.sessionId).length)continue;
         this.settlePerm(id,false);
       }

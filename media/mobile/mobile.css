@@ -1,7 +1,7 @@
 /*
- * `chat.css` được viết cho webview nên đọc toàn biến `--vscode-*` do workbench bơm vào.
- * Trang này không có workbench, nên phải tự khai bảng màu. Giữ đúng TÊN biến — đổi tên là
- * phải sửa cả `chat.css`, mà file đó dùng chung với panel.
+ * `chat.css` is written for the webview, so it reads `--vscode-*` variables injected by the workbench.
+ * This page has no workbench, so it declares the palette itself. Keep the variable NAMES — renaming
+ * means editing `chat.css` too, and that file is shared with the panel.
  */
 :root{
   color-scheme:light dark;
@@ -52,53 +52,53 @@
     --vscode-editorWarning-foreground:#d7ba7d;
   }
 }
-/* `chat.css` chỉ tô `body`; vùng status bar của PWA standalone là nền của `html` nên nó
-   kẹt ở trắng mặc định của UA. */
+/* `chat.css` only paints `body`; the status bar area of a standalone PWA is the `html` background, so it
+   stays stuck at the UA's default white. */
 html{background:var(--vscode-sideBar-background)}
-/* Safari vẽ nội dung xuống dưới home indicator; composer phải tự chừa ra. */
+/* Safari draws content under the home indicator; the composer has to leave room itself. */
 footer{padding-bottom:env(safe-area-inset-bottom)}
 header{padding-top:calc(7px + env(safe-area-inset-top))}
-/* Home Screen PWA: body PHẢI vừa đúng canvas. Kéo dài nó (0.29.35: `100dvh + safe-area`) đưa
-   composer xuống đúng chỗ nhìn thấy, nhưng phần dôi là scrollable overflow — iOS cuộn đúng chỗ đó
-   khi focus ô nhập rồi nằm lại luôn, và `overflow:hidden` không chặn được cú cuộn do focus. Đo
-   trên ảnh case C: cả trang lệch lên ~21 CSS px, đáy thành vừa đẹp còn header dính sát status bar.
-   Chỗ cần lùi vào là padding của footer, không phải chiều cao của body — xem rule standalone
-   bên dưới phần composer. */
-/* Dưới composer còn hở ~12px, đo trên máy hai lần (padding đáy 8px thì hở 20px, 0px thì hở 12px).
-   ĐỪNG cộng 12px vào `height`: body cao hơn canvas là sinh lại đúng dải cuộn đã gây case C.
-   `-webkit-fill-available` đã thử ở 0.29.38 và ra đúng bằng `100dvh` trên iOS 26 standalone, tức
-   vô tác dụng — đã gỡ. Chưa biết 12px này là canvas cao hơn `dvh` hay là vùng iOS không cho vẽ
-   tới; phân biệt bằng `?vv=1`, so `inner` với chiều cao body. */
+/* Home Screen PWA: body MUST fit the canvas exactly. Stretching it (0.29.35: `100dvh + safe-area`) put
+   the composer where it is visible, but the excess is scrollable overflow — iOS scrolls there when the
+   input is focused and stays there, and `overflow:hidden` does not block focus scrolling. Measured
+   on screenshot case C: the whole page shifted up ~21 CSS px, the bottom fit and the header hugged the status bar.
+   The inset belongs in the footer padding, not the body height — see the standalone rule
+   below the composer section. */
+/* ~12px stays open below the composer, measured twice on device (8px bottom padding leaves 20px, 0px leaves 12px).
+   DON'T add 12px to `height`: a body taller than the canvas recreates the exact scroll strip behind case C.
+   `-webkit-fill-available` was tried in 0.29.38 and came out equal to `100dvh` on iOS 26 standalone, i.e.
+   no effect — removed. Unknown whether these 12px are canvas taller than `dvh` or an area iOS won't let
+   us draw into; tell them apart with `?vv=1` by comparing `inner` with the body height. */
 @media (display-mode:standalone){html,body{overflow:hidden;overscroll-behavior:none}}
-/* Status bar `default` (mobileServer.html): canvas bắt đầu DƯỚI status bar nhưng `100dvh` vẫn báo
-   gồm cả status bar ⇒ body dôi xuống dưới mép đáy đúng bằng phần đó (game Tales of Ascension đo
-   được cùng lỗi, sửa cùng cách). `100%` = đúng canvas. Bàn phím mở thì inline height của chat.js
-   vẫn thắng. */
+/* Status bar `default` (mobileServer.html): the canvas starts BELOW the status bar but `100dvh` still
+   includes it ⇒ body overflows the bottom edge by exactly that much (seen in another web app too,
+   fixed the same way). `100%` = exactly the canvas. With the keyboard open chat.js's inline height
+   still wins. */
 @media (display-mode:standalone){html,body{height:100%}}
-/* iOS 26+ web app: không có phần tử fixed đè mép trên thì hệ thống phủ blur lên status bar.
-   WebKit lấy màu thanh từ background-color COMPUTED (không phải pixel vẽ) của phần tử fixed ở mép
-   trên, bỏ qua box ≤10px ⇒ cao 12px. background-clip:text = không vẽ gì, pointer-events:none =
-   chạm xuyên qua. Chỉ standalone: trong tab Safari nó làm toolbar đặc. */
+/* iOS 26+ web app: with no fixed element covering the top edge the system blurs the status bar.
+   WebKit takes the bar color from the COMPUTED background-color (not painted pixels) of a fixed element at the top
+   edge, ignoring boxes ≤10px ⇒ 12px tall. background-clip:text = paints nothing, pointer-events:none =
+   taps pass through. Standalone only: in a Safari tab it makes the toolbar opaque. */
 .ios-top-edge{display:none}
 @supports (-webkit-touch-callout:none){@media (display-mode:standalone){.ios-top-edge{display:block;
   position:fixed;top:0;left:0;right:0;height:12px;z-index:2147483647;pointer-events:none;
   background-color:var(--vscode-sideBar-background);background-clip:text;-webkit-background-clip:text}}}
-/* `?vv=1`: iOS ở đây không debug từ xa được, nên in thẳng số đo lên màn hình. */
+/* `?vv=1`: iOS can't be remote-debugged here, so measurements are printed on screen. */
 #vvdebug{position:fixed;left:0;top:0;z-index:99;pointer-events:none;white-space:pre;
   background:rgba(0,0,0,.72);color:#fff;font:11px/1.35 var(--vscode-editor-font-family);padding:3px 5px}
 
-/* Composer của trang PWA là control chính như app chat native: một khối bo tròn, ít chrome,
-   textarea thấp khi rỗng và tự nở theo `chat.js`. Những rule này nằm ở mobile.css để panel
-   desktop vẫn giữ đúng layout/tap behavior cũ. */
+/* The PWA composer is the main control, like a native chat app: one rounded block, little chrome,
+   textarea short when empty and growing via `chat.js`. These rules live in mobile.css so the desktop
+   panel keeps its existing layout/tap behaviour. */
 footer{border-top:0;padding:4px 8px calc(4px + env(safe-area-inset-bottom));background:var(--vscode-sideBar-background)}
-/* Trong PWA không có thanh địa chỉ nào chiếm chỗ, composer là đáy màn hình thật: chừa cả
-   safe-area là dôi ra một dải trống bằng chiều cao home indicator. 0 chứ không phải 8px là theo
-   mắt trên máy — viền dưới khối bo tròn trùng mép canvas, dải home indicator nằm đè lên nền
-   footer chứ không phải lên nút nào. */
+/* In a PWA no address bar takes space and the composer is the true screen bottom: reserving the full
+   safe-area leaves an empty strip the height of the home indicator. 0 rather than 8px is by
+   eye on device — the bottom edge of the rounded block meets the canvas edge, and the home indicator sits over the
+   footer background rather than over a button. */
 @media (display-mode:standalone){footer{padding-bottom:0}}
-/* Khi keyboard mở, visualViewport đã kết thúc ngay trên keyboard; giữ safe-area ở đây
-   sẽ tạo thêm một khoảng trống giữa composer và thanh input của iOS. Attribute selector nên
-   rule này thắng rule standalone ở trên bất kể thứ tự. */
+/* With the keyboard open, visualViewport already ends right above it; keeping the safe-area here
+   adds a gap between the composer and the iOS input bar. The attribute selector makes
+   this rule beat the standalone rule above regardless of order. */
 body[data-keyboard="open"] footer{padding-bottom:4px}
 #thinking{min-height:20px;gap:5px;padding:0 5px 3px;font-size:12.5px}
 #thinking #spinner,#thinking #spinner svg{width:11px;height:11px}
@@ -121,8 +121,8 @@ button#send{width:38px;height:38px;border-radius:50%;font-size:20px}
   border-bottom:1px solid var(--vscode-panel-border);color:var(--vscode-editor-foreground)}
 .sheet-x{background:none;border:none;color:var(--vscode-descriptionForeground);font-size:17px;padding:4px 8px}
 .sheet-list{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
-/* Một dòng cho mỗi lựa chọn: 40 repo xếp hai dòng thì cả sheet chỉ vừa 8 cái, và cái phân biệt
-   chúng (tên) đã nằm bên trái — workspace chỉ là chú thích nên dạt phải và co lại trước. */
+/* One line per option: 40 repos on two lines each fit only 8 per sheet, and what tells
+   them apart (the name) is already on the left — the workspace is only a note, so it floats right and shrinks first. */
 .sheet-row{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;width:100%;
   text-align:left;background:none;border:none;border-bottom:1px solid var(--vscode-panel-border);
   color:var(--vscode-editor-foreground);font:inherit;padding:0 16px;min-height:46px}
@@ -142,9 +142,9 @@ button#send{width:38px;height:38px;border-radius:50%;font-size:20px}
   color:var(--vscode-descriptionForeground)}
 .sheet-empty{padding:22px 16px;color:var(--vscode-descriptionForeground);text-align:center}
 
-/* Ngăn kéo lịch sử: chỉ có ở bản mobile. Scrim là phần tử riêng chứ không phải nền của
-   #drawer — kéo tay mờ dần theo ngón qua `--d-op`, mà đặt opacity lên #drawer thì mờ luôn
-   cả ngăn kéo. */
+/* History drawer: mobile only. The scrim is its own element rather than the background of
+   #drawer — dragging fades it with the finger via `--d-op`, and putting opacity on #drawer would fade
+   the whole drawer. */
 #drawer{position:fixed;inset:0;z-index:60}
 #drawer[hidden]{display:none}
 #drawer .scrim{position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:var(--d-op,0);transition:opacity .18s ease-out}
@@ -154,6 +154,6 @@ button#send{width:38px;height:38px;border-radius:50%;font-size:20px}
   transform:translateX(-100%);transition:transform .18s ease-out;
   padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
 #drawer.open .drawer-box{transform:none}
-/* Đang theo ngón thì transform do JS đặt từng frame; để transition là trễ một nhịp. */
+/* While following the finger, JS sets transform every frame; a transition would lag one beat. */
 #drawer.dragging .drawer-box,#drawer.dragging .scrim{transition:none}
 .sheet-row.on{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}

@@ -110,16 +110,16 @@ test('a turn cut off mid-stream is not marked done by an older turn_done',async(
   const store=new SessionStore(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-recover-')));
   await store.upsert({provider:'claude',nativeSessionId:'s1',workspaceId:'w',projectId:'p',cwd:'/tmp',
     title:'t',status:'running',createdAt:1,updatedAt:2} as any);
-  // Lượt cũ xong hẳn, lượt mới chết giữa chừng: quét cả file sẽ vớ phải turn_done của lượt cũ.
-  const transcript=[{type:'user_message',text:'cũ',timestamp:1},{type:'turn_done',timestamp:2},
-                    {type:'user_message',text:'mới',timestamp:3},{type:'assistant_delta',text:'dở',timestamp:4}];
+  // The old turn finished, the new one died midway: scanning the whole file would pick up the old turn's turn_done.
+  const transcript=[{type:'user_message',text:'old',timestamp:1},{type:'turn_done',timestamp:2},
+                    {type:'user_message',text:'new',timestamp:3},{type:'assistant_delta',text:'partial',timestamp:4}];
   const m=new SessionManager(store,{claude:{loadTranscript:async()=>transcript}} as any,4);
   await m.recoverStaleSessions();
-  assert.equal((await store.get('claude','s1'))!.status,'imported','dở dang thì là imported, không phải done');
+  assert.equal((await store.get('claude','s1'))!.status,'imported','unfinished means imported, not done');
 
   const finished=[...transcript,{type:'turn_done',timestamp:5}];
   await store.upsert({...(await store.get('claude','s1'))!,status:'running'});
   const m2=new SessionManager(store,{claude:{loadTranscript:async()=>finished}} as any,4);
   await m2.recoverStaleSessions();
-  assert.equal((await store.get('claude','s1'))!.status,'done','lượt cuối xong thật thì vẫn là done');
+  assert.equal((await store.get('claude','s1'))!.status,'done','a last turn that really finished is still done');
 });

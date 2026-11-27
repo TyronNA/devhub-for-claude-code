@@ -4,8 +4,8 @@ export type WebviewMessage=
   {type:'pickProvider'}|{type:'pickProject'}|{type:'pickHistory'}|{type:'newTab'}|{type:'pickModel'}|{type:'pickEffort'}|{type:'permissionResponse';requestId:string;allow:boolean;answers?:Record<string,string>}|{type:'pickSlash'}|{type:'pickChanged'}|{type:'copySessionId'}|{type:'openLink';href:string}|
   {type:'pasteImage';mime:string;data:string;requestId?:string}|{type:'compact'}|{type:'dequeue';index:number};
 
-// Ảnh dán vào đi qua postMessage dưới dạng base64, nên phải chặn cứng: một tấm
-// screenshot Retina ~4MB base64, quá ngưỡng này là dán nhầm file chứ không phải ảnh.
+// Pasted images travel over postMessage as base64, so a hard cap is needed: one
+// Retina screenshot is ~4MB of base64; past this threshold it's a wrongly pasted file, not an image.
 const MAX_IMAGE_B64=12*1024*1024;
 const IMAGE_MIME=new Set(['image/png','image/jpeg','image/gif','image/webp']);
 
@@ -24,7 +24,7 @@ export function parseWebviewMessage(input:any):WebviewMessage|undefined{
   if(input.type==='compact')return {type:'compact'};
   if(input.type==='copySessionId')return {type:'copySessionId'};
   if(input.type==='dequeue'&&Number.isInteger(input.index)&&input.index>=0&&input.index<1000)return {type:'dequeue',index:input.index};
-  // Chỉ http(s) — đừng để markdown lôi được file:// hay lệnh nào khác ra.
+  // http(s) only — don't let markdown pull out file:// or any other scheme.
   if(input.type==='openLink'&&typeof input.href==='string'&&input.href.length<=4096&&/^https?:\/\//i.test(input.href))
     return {type:'openLink',href:input.href};
   if(input.type==='permissionResponse'&&typeof input.requestId==='string'&&input.requestId.length<=200&&typeof input.allow==='boolean'){
@@ -38,7 +38,7 @@ export function parseWebviewMessage(input:any):WebviewMessage|undefined{
     return {type:'permissionResponse',requestId:input.requestId,allow:input.allow,answers};
   }
   if(input.type==='sendPrompt'&&typeof input.text==='string'&&input.text.length<=200_000){
-    // Ảnh đi thành trường riêng để provider gắn đúng cách (`-i`), không nhét vào text.
+    // Images travel as a separate field so the provider attaches them properly (`-i`), not stuffed into the text.
     const attachments=Array.isArray(input.attachments)
       ? input.attachments.filter((x:any)=>typeof x==='string'&&x.length<=32_768&&path.isAbsolute(x)).slice(0,16)
       : undefined;

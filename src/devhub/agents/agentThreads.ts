@@ -6,13 +6,13 @@ const execFile=util.promisify(cp.execFile);
 
 export interface AgentThread { id:string; title:string; at:number; channel?:string; user?:string; }
 
-/** Hai bot có schema `threads` khác nhau, nên dò cột thay vì hardcode SQL. */
+/** The two bots have different `threads` schemas, so probe the columns instead of hardcoding SQL. */
 export function buildThreadSql(threadCols:string[],msgCols:string[]|undefined,runCols:string[]|undefined,limit:number,offset=0){
   const has=(c:string)=>threadCols.includes(c);
   let id=has('thread_ts')?'thread_ts':threadCols[0];
   if(!id)return undefined;
-  // Khác `at` (allowlist bên dưới), cái này có thể là tên cột thô từ `pragma table_info` của
-  // một DB lạ: nối trần vào SQL là để schema quyết định câu query.
+  // Unlike `at` (allowlist below), this may be a raw column name from `pragma table_info` of
+  // an unknown DB: splicing it into SQL lets the schema decide the query.
   id=`"${id.replace(/"/g,'""')}"`;
   const at=['last_active_at','updated_at','created_at'].find(has);
   const msg=(cols?:string[])=>!!cols&&cols.includes('thread_ts');
@@ -21,7 +21,7 @@ export function buildThreadSql(threadCols:string[],msgCols:string[]|undefined,ru
   const pick=(col:string,cols?:string[])=>runOk&&cols&&cols.includes(col)
     ? `(select r.${col} from runs r where r.thread_ts=t.${id} and coalesce(r.${col},'')<>'' order by r.rowid desc limit 1)` : null;
 
-  // Tiêu đề: summary -> tin nhắn user -> tin nhắn bất kỳ -> input_preview của run -> ticket -> id
+  // Title: summary -> user message -> any message -> the run's input_preview -> ticket -> id
   const title=[
     has('summary')?"nullif(t.summary,'')":null,
     msgOk?`(select substr(m.text,1,70) from messages m where m.thread_ts=t.${id} and m.role='user' order by m.rowid limit 1)`:null,
@@ -42,7 +42,7 @@ export function buildThreadSql(threadCols:string[],msgCols:string[]|undefined,ru
        + ` limit ${Math.max(1,limit)} offset ${Math.max(0,offset)};`;
 }
 
-/** epoch giây (Slack ts) hoặc mili — chuẩn hoá về ms. */
+/** Epoch seconds (Slack ts) or millis — normalised to ms. */
 export function toMs(v:any){const n=Number(v);if(!Number.isFinite(n)||n<=0)return 0;return n>1e12?n:n*1000;}
 
 export function resolveDb(cwd:string,db?:string){
@@ -59,7 +59,7 @@ async function cols(db:string,table:string):Promise<string[]|undefined>{
   }catch{return undefined;}
 }
 
-/** review-bot lưu input_preview dạng JSON; hiện `command` thay vì cả cục JSON. */
+/** review-bot stores input_preview as JSON; show `command` instead of the whole JSON blob. */
 export function prettyTitle(raw:any):string{
   let t=String(raw??'').trim();
   if(t.startsWith('{')){
@@ -86,7 +86,7 @@ export async function readThreads(cwd:string,db:string|undefined,limit:number,of
   const t=await cols(file,'threads'); if(!t)return [];
   const sql=buildThreadSql(t,await cols(file,'messages'),await cols(file,'runs'),limit,offset); if(!sql)return [];
   try{
-    // -readonly: đọc DB của bot ĐANG chạy, tuyệt đối không được khoá ghi của nó.
+    // -readonly: reads the DB of a RUNNING bot and must never take its write lock.
     const {stdout}=await execFile('sqlite3',['-readonly','-json',file,sql],{timeout:6000});
     return normalizeRows(String(stdout));
   }catch{return [];}

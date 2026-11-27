@@ -4,22 +4,22 @@ const os=require('node:os');
 const path=require('node:path');
 const execFile=util.promisify(cp.execFile);
 
-/** `kind:'http'` = bot có API loopback (planner): con của nó là task đọc qua HTTP, không
- *  phải thread đọc từ SQLite. Start/stop/logs vẫn là Makefile như mọi bot khác. */
+/** `kind:'http'` = a bot with a loopback API (planner): its children are tasks read over HTTP, not
+ *  threads read from SQLite. Start/stop/logs are still a Makefile like every other bot. */
 export interface AgentSpec { name:string; cwd:string; start?:string; stop?:string; status?:string; logs?:string; db?:string; kind?:'process'|'http'; endpoint?:string; }
 export interface AgentState { spec:AgentSpec; running:boolean; detail:string; }
 
 export function expandHome(p:string){return p.startsWith('~')?path.join(os.homedir(),p.slice(1)):p;}
 
-/** Makefile của cả hai bot đều in "running (pid=…)" hoặc "not running". */
+/** Both bots' Makefiles print "running (pid=…)" or "not running". */
 export function parseStatus(out:string):{running:boolean;detail:string}{
   const t=String(out||'').trim();
   const running=/(^|\b)running\b/i.test(t)&&!/not\s+running/i.test(t);
   return {running,detail:t.split('\n')[0]?.slice(0,120)||(running?'running':'stopped')};
 }
 
-/** Bốn verb đi thẳng vào `/bin/sh -lc`; non-string thì bỏ để rơi về `make <verb>` chứ
- *  đừng đẩy nguyên object xuống execFile. */
+/** The four verbs go straight to `/bin/sh -lc`; non-strings are dropped to fall back to `make <verb>` rather
+ *  than pushing a whole object into execFile. */
 const verb=(v:any)=>typeof v==='string'&&v.trim()?v:undefined;
 export function normalizeAgents(raw:any):AgentSpec[]{
   if(!Array.isArray(raw))return [];

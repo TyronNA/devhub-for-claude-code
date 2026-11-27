@@ -22,9 +22,9 @@ export class WorkspaceStore {
   }
   private async save(data:WorkspaceStoreFile){ this.data=data; await writeJsonAtomic(this.file, data); }
   /**
-   * Mọi lệnh ghi đi qua một hàng, y như `SessionStore`/`QueueStore`. Không có nó thì hai lệnh
-   * song song cùng await `normalizeProjectPath` (đọc đĩa) giữa lúc kiểm tra và lúc push —
-   * đủ để hai project cùng đường dẫn lọt qua vòng dedupe, và để hai `writeJsonAtomic` đè nhau.
+   * Every write goes through one queue, just like `SessionStore`/`QueueStore`. Without it two parallel commands
+   * both await `normalizeProjectPath` (a disk read) between the check and the push —
+   * enough for two projects with the same path to slip through the dedupe, and for two `writeJsonAtomic`s to clobber each other.
    */
   private chain:Promise<any>=Promise.resolve();
   private exclusive<T>(fn:()=>Promise<T>):Promise<T>{ const next=this.chain.then(fn,fn); this.chain=next.then(()=>undefined,()=>undefined); return next; }

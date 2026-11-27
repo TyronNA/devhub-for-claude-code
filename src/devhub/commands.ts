@@ -10,7 +10,7 @@ import { chatSession, endpointOf, isHttpAgent } from './agents/plannerTasks';
 import { normalizeAgents } from './agents/agentRunner';
 import { DevHubSession } from './types';
 
-/** Signal 0 không gửi gì, chỉ để hỏi process còn sống hay không. */
+/** Signal 0 sends nothing; it only asks whether the process is still alive. */
 function alive(pid:number){try{process.kill(pid,0);return true;}catch{return false;}}
 function signal(pid:number,sig:'SIGTERM'|'SIGKILL'){
   try{process.kill(pid,sig);return true;}
@@ -25,8 +25,8 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
   r('devhub.removeProject',async(node?:DevHubTreeNode)=>{if(node?.type!=='project')return;const answer=await vscode.window.showWarningMessage(`Remove ${node.data.project.name} from Dev Hub? Native Claude history is not deleted.`,'Remove');if(answer!=='Remove')return;await deps.workspaces.removeProject(node.data.project.id);deps.tree.refresh();});
   const newChat=async(provider:'claude',node?:DevHubTreeNode)=>{const snap=await deps.workspaces.snapshot();let project=node?.type==='project'?node.data.project:undefined;let workspace=node?.workspace ?? (node?.type==='workspace'?node.data.workspace:undefined);if(!project){const candidates=workspace?snap.projects.filter(p=>p.workspaceId===workspace.id):snap.projects;const picks=candidates.map(p=>({label:p.name,description:snap.workspaces.find(w=>w.id===p.workspaceId)?.name,project:p}));const pick=await vscode.window.showQuickPick(picks,{placeHolder:`Choose project for ${provider}`});if(!pick)return;project=pick.project;workspace=snap.workspaces.find(w=>w.id===project.workspaceId);}if(project&&workspace)await deps.chat.newChat(workspace,project,provider);};
   r('devhub.newClaudeChat',(node?:DevHubTreeNode)=>newChat('claude',node));
-  // TreeView không có sự kiện double-click: mỗi click chạy lại command của item, nên hai lần
-  // openChat cùng một hàng sát nhau = double-click → rename. Click đầu vẫn mở chat như cũ.
+  // TreeView has no double-click event: every click re-runs the item's command, so two
+  // openChat calls on the same row in quick succession = double-click → rename. The first click still opens the chat as before.
   let lastClick={key:'',at:0};
   const renameSession=async(s:DevHubSession)=>{const name=await vscode.window.showInputBox({prompt:'Rename chat (empty = back to the first prompt)',value:s.name||s.title});if(name===undefined)return;await deps.sessions.rename(s.provider,s.nativeSessionId,name);deps.tree.refresh();};
   r('devhub.openChat',async(node?:DevHubTreeNode)=>{if(node?.type!=='session'){deps.chat.showCurrent();return;}
@@ -54,11 +54,11 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
     await vscode.env.clipboard.writeText(n.data.thread.id);
     vscode.window.setStatusBarMessage('Thread id copied',1500);});
   /**
-   * Session chỉ được ghi vào store khi người dùng thật sự mở nó — inbox không phải lịch sử.
-   * `upsert` merge SHALLOW nên field nào hàng mới khai là thắng, và cả `taskSession` lẫn
-   * `chatSession` đều khai `status:'imported'`: mở lại một session đang chạy sẽ xoá 'running'
-   * khỏi store, statusbar mất chữ "1 running" giữa lượt. `chatSession` còn khai timestamp 0,
-   * đủ để hàng đó tụt đáy mọi danh sách sắp theo `updatedAt`.
+   * A session is only written to the store when the user actually opens it — the inbox is not history.
+   * `upsert` merges SHALLOW so whatever field the new row declares wins, and both `taskSession` and
+   * `chatSession` declare `status:'imported'`: reopening a running session would erase 'running'
+   * from the store and the status bar would lose "1 running" mid-turn. `chatSession` also declares timestamp 0,
+   * enough to sink that row to the bottom of every list sorted by `updatedAt`.
    */
   const openPlanner=async(fresh:DevHubSession)=>{
     const old=await deps.sessions.get('planner',fresh.nativeSessionId);
@@ -72,7 +72,7 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
     if(n?.type!=='plannerTask'&&n?.type!=='plannerChat')return;
     await openPlanner(n.data.session);
   });
-  /** Hỏi tự do, gọi được từ palette nên không phụ thuộc cây đang mở hay đang gập. */
+  /** A free-form question, callable from the palette so it doesn't depend on the tree being open or collapsed. */
   r('devhub.askAgent',async()=>{
     const agents=normalizeAgents(vscode.workspace.getConfiguration('devHub').get('agents',[])).filter(isHttpAgent);
     if(!agents.length){vscode.window.showInformationMessage('No task agent configured — add one to devHub.agents with "kind":"http".');return;}
@@ -83,7 +83,7 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
     await openPlanner(chatSession(spec,snap.projects));
   });
   const plannerClient=(n:any)=>new PlannerClient(endpointOf(n.data.spec),20000);
-  /** Row trong cây có thể đã cũ; mọi thao tác đọc lại task THẬT trước khi đụng vào nó. */
+  /** A tree row may be stale; every action re-reads the REAL task before touching it. */
   const freshTask=async(n:any):Promise<{client:PlannerClient;task:PlannerTask}|undefined>=>{
     const client=plannerClient(n);
     try{return {client,task:await client.task(n.data.task.jira_key)};}
@@ -99,7 +99,7 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
     if(task.status!=='WAITING_APPROVAL'||!version){
       vscode.window.showWarningMessage(`${task.jira_key} is ${task.status}, not WAITING_APPROVAL \u2014 nothing to approve.`);
       deps.tree.refresh();return;}
-    // Modal: duyệt là cho phép nó ghi code. Version phải nằm trong câu hỏi, không phải ngầm hiểu.
+    // Modal: approving lets it write code. The version must be in the question, not implied.
     const detail=[task.summary,`plan v${version}`,
       typeof task.confidence==='number'?`confidence ${task.confidence.toFixed(2)}`:'',
       task.affected_repos?.length?`repos: ${task.affected_repos.join(', ')}`:''].filter(Boolean).join('\n');
@@ -111,14 +111,14 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
   r('devhub.plannerReject',async(n?:any)=>{
     if(n?.type!=='plannerTask')return;
     const fresh=await freshTask(n);if(!fresh)return;
-    const reason=await vscode.window.showInputBox({prompt:`Reject ${fresh.task.jira_key} \u2014 why?`,placeHolder:'sai service / thiếu ngữ cảnh / để sau'});
+    const reason=await vscode.window.showInputBox({prompt:`Reject ${fresh.task.jira_key} \u2014 why?`,placeHolder:'wrong service / missing context / later'});
     if(reason===undefined)return;
     try{afterPlanner(await fresh.client.reject(fresh.task.jira_key,reason),'rejected');}
     catch(e:any){vscode.window.showErrorMessage(`Reject failed \u2014 ${e?.message||e}`);deps.tree.refresh();}
   });
   /**
-   * Ticket đã xong ngoài agent (merge tay, PM đóng). KHÔNG dùng Reject cho việc này:
-   * reject đẩy task về ANALYZING và deep-plan lại mất $5-7, còn dismiss kết thúc nó.
+   * The ticket was finished outside the agent (merged by hand, closed by the PM). DON'T use Reject for this:
+   * reject sends the task back to ANALYZING and deep-plans again for $5-7, while dismiss ends it.
    */
   r('devhub.plannerDismiss',async(n?:any)=>{
     if(n?.type!=='plannerTask')return;
@@ -130,7 +130,7 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
     const pick=await vscode.window.showWarningMessage(`Dismiss ${task.jira_key}?`,{modal:true,detail},'Dismiss');
     if(pick!=='Dismiss')return;
     const reason=await vscode.window.showInputBox({prompt:`Dismiss ${task.jira_key} — why? (optional)`,
-      placeHolder:'đã làm tay / PM đóng / không cần nữa'});
+      placeHolder:'done by hand / closed by PM / no longer needed'});
     if(reason===undefined)return;
     try{afterPlanner(await client.dismiss(task.jira_key,reason),'dismissed');}
     catch(e:any){vscode.window.showErrorMessage(`Dismiss failed — ${e?.message||e}`);deps.tree.refresh();}
@@ -153,7 +153,7 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
       'It writes commits in its own worktrees and pushes nothing.'].filter(Boolean).join('\n');
     const pick=await vscode.window.showWarningMessage(`Let the agent implement ${task.jira_key}?`,{modal:true,detail},'Execute');
     if(pick!=='Execute')return;
-    // Preflight (Jira/repo đổi) chạy trong POST này và có thể mất vài giây; đừng để cửa sổ im.
+    // Preflight (Jira/repo changes) runs inside this POST and can take a few seconds; don't leave the window silent.
     await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:`${task.jira_key}: preflight + execute`},async()=>{
       try{afterPlanner(await client.execute(task.jira_key),'executing');}
       catch(e:any){vscode.window.showErrorMessage(`Execute refused \u2014 ${e?.message||e}`);deps.tree.refresh();}
@@ -170,8 +170,8 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
     const fresh=await freshTask(n);if(!fresh)return;
     const runId=Number(fresh.task.current_run_id||0);
     if(!runId){vscode.window.showWarningMessage(`${fresh.task.jira_key} has no run to stop.`);deps.tree.refresh();return;}
-    // `/runs/{id}/stop` chỉ ghi status='blocked' vào DB; executor không đọc lại giữa các vòng
-    // fix, nên worker có thể còn ghi commit sau khi hàng này đã đổi màu. Đừng nói "stopped".
+    // `/runs/{id}/stop` only writes status='blocked' to the DB; the executor doesn't re-read it between fix
+    // rounds, so the worker may still commit after this row changed colour. Don't say "stopped".
     try{await fresh.client.stopRun(runId);afterPlanner(fresh.task,`run ${runId} marked blocked — the worker may still finish its current fix loop`);}
     catch(e:any){vscode.window.showErrorMessage(`Stop failed \u2014 ${e?.message||e}`);deps.tree.refresh();}
   });
@@ -183,13 +183,13 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
   r('devhub.restartAgent',async(n?:any)=>{await agentAction(n,'stop');await agentAction(n,'start');});
   r('devhub.openAgentLogs',(n?:any)=>{
     if(n?.type!=='agent')return;const spec=n.data.spec;
-    // Log chạy `tail -f`, phải ở terminal thật chứ không nuốt vào output channel.
+    // The log runs `tail -f`, so it needs a real terminal rather than being swallowed into an output channel.
     const t=vscode.window.createTerminal({name:`${spec.name} logs`,cwd:spec.cwd});
     t.sendText(deps.tree.agents().logsCommand(spec));t.show();
   });
   r('devhub.revealAgent',async(n?:any)=>{if(n?.type!=='agent')return;
     await vscode.commands.executeCommand('revealFileInOS',vscode.Uri.file(n.data.spec.cwd));});
-  // Nhảy giữa các session ĐANG CHẠY — đúng lúc tay bận nhất.
+  // Jump between RUNNING sessions — exactly when your hands are busiest.
   const cycleRunning=async(delta:number)=>{
     const all=await deps.sessions.list();
     const running=all.filter((s:any)=>s.status==='running').sort((a:any,b:any)=>a.updatedAt-b.updatedAt);
@@ -213,13 +213,13 @@ export function registerCommands(ctx:any,deps:{workspaces:WorkspaceService;tree:
   r('devhub.killPort',async(node?:DevHubTreeNode)=>{
     if(node?.type!=='port')return;
     const {proc,port}=node.data as any;
-    // Modal: nhầm một cái là chết ControlCenter/Code Helper, không undo được.
+    // Modal: one mistake kills ControlCenter/Code Helper, with no undo.
     const answer=await vscode.window.showWarningMessage(
       `Kill ${proc.command} (pid ${proc.pid}) listening on :${port}?`,
       {modal:true,detail:proc.cwd||'(no cwd)'},'Kill');
     if(answer!=='Kill')return;
     if(!signal(proc.pid,'SIGTERM'))return;
-    // SIGTERM để nó tự dọn; process nào phớt lờ thì mới hỏi tiếp SIGKILL.
+    // SIGTERM so it cleans up itself; only a process that ignores it gets asked about SIGKILL.
     await new Promise(res=>setTimeout(res,1200));
     if(alive(proc.pid)){
       const force=await vscode.window.showWarningMessage(

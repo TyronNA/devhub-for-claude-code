@@ -24,7 +24,7 @@ import { providerLabel } from './devhub/ui/format';
 import { findRestorableSession } from './devhub/sessions/selection';
 import { reconcileImportedSessions } from './devhub/sessions/historyReconciler';
 
-// ~30s: đủ cho extension host cũ thoát sau Reload Window.
+// ~30s: enough for the old extension host to exit after Reload Window.
 const MOBILE_PORT_RETRIES=15,MOBILE_PORT_RETRY_MS=2000;
 let manager:SessionManager|undefined;let chat:ChatPanelProvider|undefined;let status:StatusBarController|undefined;let mobile:MobileServer|undefined;let plannerWatch:PlannerWatcher|undefined;let gitWatcher:GitStatusWatcher|undefined;
 export async function activate(context:any){
@@ -35,14 +35,14 @@ export async function activate(context:any){
   const tree=new DevHubTreeProvider(workspaces,sessionStore,{
     get:()=>context.globalState.get('devhub.pinnedPorts',[]) as number[],
     set:(v:number[])=>void context.globalState.update('devhub.pinnedPorts',v)},
-    // Closure chứ không phải giá trị: `tree` dựng TRƯỚC `chat`/`mobile`, và trang mobile được
-    // hỏi duyệt trước panel nên hàng đang chờ có thể nằm ở bất kỳ đầu nào.
+    // A closure, not a value: `tree` is built BEFORE `chat`/`mobile`, and the mobile page is
+    // asked for approval before the panel, so a waiting row may sit at either end.
     (prov:string,id:string)=>!!chat?.isAwaitingPermission?.(prov,id)||!!mobile?.isAwaitingPermission?.(prov,id),
     ()=>providers.claude.livePids?.()||[]);const treeView=vscode.window.createTreeView('devHub.sessions',{treeDataProvider:tree,showCollapseAll:true});context.subscriptions.push(treeView);context.subscriptions.push({dispose:()=>tree.dispose()});
-  // Đọc setting mỗi lần gọi: đổi file/nhãn không cần reload, và wrapper cũng đọc file mỗi lần spawn.
+  // Read the setting on every call: changing the file/label needs no reload, and the wrapper also reads the file on every spawn.
   const altAccount=()=>{const c=vscode.workspace.getConfiguration('devHub');return {file:c.get('claude.altAccountFile','').trim(),alt:c.get('claude.altAccountName','Alt'),main:c.get('claude.defaultAccountName','Default')};};
   const accountOf=(root:string)=>{const a=altAccount();return a.file?(altRootFor(a.file,root)?a.alt:a.main):undefined;};
-  // Panel và trang mobile đi chung một đường: retire session đang mở thì CLI cũ không chạy tiếp acc cũ.
+  // Panel and mobile page share one path: retire the open session so the old CLI doesn't keep running on the old account.
   const switchAccount=async(root:string,name:string):Promise<{level:'info'|'warn'|'error';message:string}>=>{
     const a=altAccount();
     let r;try{r=toggleAltRoot(a.file,root);}catch(e:any){return {level:'error',message:`cannot write ${a.file}: ${e?.message||e}`};}
@@ -70,10 +70,10 @@ export async function activate(context:any){
     if(e.affectsConfiguration('devHub.cliUpdateCheck')||e.affectsConfiguration('devHub.claude.executable'))void cliUpdate.refresh();
   }));
   /**
-   * Cờ spawn của Claude KHÔNG hot-swap được: một ClaudeProvider giữ process sống xuyên
-   * lượt, và nó còn được gắn slash store + permission sink ở dưới — dựng lại là bỏ rơi mấy process
-   * đó và cắt đường trả lời xin quyền, mà một yêu cầu xin quyền thì BẮT BUỘC phải được trả lời.
-   * Nên ở đây chỉ nói thật: nó cần reload. Im lặng mới là thứ đã tốn của người dùng cả buổi sáng.
+   * Claude's spawn flags CANNOT be hot-swapped: a ClaudeProvider keeps processes alive across
+   * turns, and it also has the slash store + permission sink attached below — rebuilding it abandons those processes
+   * and cuts the permission reply path, and a permission request MUST be answered.
+   * So just tell the truth here: it needs a reload. Silence is what cost the user a whole morning.
    */
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async(e:any)=>{
     if(!['claude.executable','claude.permissionMode','claude.appendSystemPrompt','claude.sessionIdleMinutes',
@@ -86,7 +86,7 @@ export async function activate(context:any){
   context.subscriptions.push(vscode.commands.registerCommand('devhub.updateCli',async()=>{
     const drifts=cliUpdate.current();
     if(!drifts.length)return void vscode.window.showInformationMessage('Dev Hub: Claude CLI is up to date.');
-    // Không tự chạy npm: cài global có thể hỏi quyền, và người dùng phải thấy lệnh trước khi nó chạy.
+    // Don't run npm automatically: a global install may ask for permissions, and the user must see the command before it runs.
     const pick=drifts.length===1?drifts[0]:(await vscode.window.showQuickPick(
       drifts.map(d=>({label:d.provider,description:`${d.installed} \u2192 ${d.latest}`,drift:d})),
       {placeHolder:'Update which CLI?'}))?.drift;
@@ -101,17 +101,17 @@ export async function activate(context:any){
     (prov:string,sid:string,rid:string,allow:boolean,updatedInput?:any)=>providers[prov]?.answerPermission?.(sid,rid,
       allow?(updatedInput?{behavior:'allow',updatedInput}:{behavior:'allow'}):{behavior:'deny',message:'Denied in Dev Hub'}),
     ()=>sessionStore.list(),
-    // Closure, không phải tham chiếu trực tiếp: `refreshHistory` khai sau chỗ này.
+    // A closure, not a direct reference: `refreshHistory` is declared after this point.
     ()=>refreshHistory());
   const refreshHistory=async()=>{const snap=await workspaces.snapshot();const imported=(await Promise.all(Object.values(providers).map((p:any)=>p.discoverHistory(snap.projects).catch((e:any)=>{output.appendLine(`history ${p.id} failed: ${e?.message||e}`);return [];})))).flat();const existing=await sessionStore.list();const changes=reconcileImportedSessions(existing,imported);if(changes.length)await sessionStore.upsertMany(changes);tree.refresh();await status?.update();};
   providers.claude.setSlashStore?.(
     ()=>context.globalState.get('devhub.slashCommands',[]) as string[],
     (v:string[])=>void context.globalState.update('devhub.slashCommands',v));
   providers.claude.setPermissionSink?.((req:any)=>{
-    // Web app mobile được hỏi TRƯỚC: nó chỉ nhận khi có client thật đang cầm session đó,
-    // và người ngồi ở điện thoại không nhìn thấy cái panel để mà duyệt.
+    // The mobile web app is asked FIRST: it only accepts when a real client holds that session,
+    // and the person at the phone can't see the panel to approve.
     if(mobile?.showPermission('claude',req.sessionId,req))return;
-    // `false` = không có tab, request đã bị deny ngay. Mời "Open" nữa thì mở ra chẳng có gì duyệt.
+    // `false` = no tab, the request was denied right away. Offering "Open" would open nothing to approve.
     if(chat?.showPermission('claude',req.sessionId,req)===false)return;
     if(notifyMode()!=='off'&&chat?.currentSessionId?.()!==req.sessionId)
       vscode.window.showWarningMessage(`${req.displayName||req.toolName} needs approval`,'Open')
@@ -119,8 +119,8 @@ export async function activate(context:any){
   });
   providers.claude.setIdleEventSink?.((sessionId:string,event:any)=>manager.ingestOutOfTurn('claude',sessionId,event));
   context.subscriptions.push({dispose:()=>providers.claude.dispose?.()});
-  // Một watcher duy nhất cho cả panel lẫn trang mobile: cùng repo = cùng cache, cùng
-  // single-flight. Không tab nào hiện thì nó không chạy lệnh git nào.
+  // A single watcher for both the panel and the mobile page: same repo = same cache, same
+  // single-flight. No visible tab means it runs no git command.
   gitWatcher=new GitStatusWatcher();
   context.subscriptions.push({dispose:()=>{gitWatcher?.dispose();gitWatcher=undefined;}});
   chat.setGitWatcher(gitWatcher);
@@ -128,9 +128,9 @@ export async function activate(context:any){
   chat.registerSerializer(context);
   registerCommands(context,{workspaces,tree,chat,sessions:sessionStore,manager,refreshHistory});
   /**
-   * Web app mobile: một trang HTTP thật, mở trên LAN cho điện thoại cùng Wi-Fi.
-   * Không dựng sẵn lúc activate — mở port là mở một đường điều khiển CLI,
-   * nên chỉ chạy khi người dùng bật hẳn.
+   * Mobile web app: a real HTTP page, opened on the LAN for a phone on the same Wi-Fi.
+   * Not built at activate — opening a port opens a path that controls a CLI,
+   * so it only runs when the user explicitly turns it on.
    */
   const mobileServer=()=>{
     if(mobile)return mobile;
@@ -152,8 +152,8 @@ export async function activate(context:any){
     context.subscriptions.push({dispose:()=>{mobile?.dispose();mobile=undefined;}});
     return mobile;
   };
-  // Tắt setting phải ĐÓNG được port đang mở. Không thì cái công tắc kia chỉ có chiều bật,
-  // và người tưởng mình vừa tắt vẫn đang phục vụ một đường điều khiển CLI.
+  // Turning the setting off must CLOSE the open port. Otherwise that switch only goes one way,
+  // and someone who thinks they just turned it off is still serving a CLI control path.
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e:any)=>{
     if(!e.affectsConfiguration('devHub.mobile.enabled'))return;
     if(vscode.workspace.getConfiguration('devHub').get('mobile.enabled',false))return;
@@ -161,11 +161,11 @@ export async function activate(context:any){
     mobile.dispose();mobile=undefined;
     output.appendLine('mobile web app stopped — devHub.mobile.enabled turned off');
   }));
-  // Máy chạy 24/7 (tunnel host) không có ai bấm command sau mỗi lần extension host khởi động lại:
-  // setting đã bật hẳn — modal đồng ý đã hỏi lúc bật — thì activate phải tự mở lại port,
-  // không thì trang trên điện thoại chết im lặng.
-  // Reload Window dựng host mới trước khi host cũ nhả port: thử một lần là ăn EADDRINUSE rồi chết
-  // im tới lần reload sau. Chỉ đợi lỗi đó — window thứ hai giữ port thật thì hết hạn vẫn báo như cũ.
+  // A 24/7 machine (tunnel host) has nobody to run a command after every extension host restart:
+  // the setting is explicitly on — the consent modal was shown when it was turned on — so activate must reopen the port itself,
+  // or the page on the phone dies silently.
+  // Reload Window builds the new host before the old one releases the port: a single attempt hits EADDRINUSE and stays dead
+  // until the next reload. Only wait on that error — if a second window really holds the port, it still reports as before once time runs out.
   void (async()=>{
     for(let attempt=0;;attempt++){
       const conf=vscode.workspace.getConfiguration('devHub');
@@ -195,25 +195,25 @@ export async function activate(context:any){
       const lan=conf.get('mobile.lan',true);
       const wanted=Math.max(0,conf.get('mobile.port',39642));
       const {port}=await mobileServer().start(wanted,!!lan);
-      // Link phải mang IP LAN, không phải 127.0.0.1: trên điện thoại loopback là chính nó.
-      // Chỉ khi socket thật sự mở ra LAN — trước đây fallback này chỉ đổi URL, bind vẫn 0.0.0.0.
+      // The link must carry the LAN IP, not 127.0.0.1: on the phone loopback is the phone itself.
+      // Only when the socket really is open to the LAN — previously this fallback only changed the URL while still binding 0.0.0.0.
       const host=(lan&&lanAddress())||'127.0.0.1';
-      // Không còn `?t=`: trang tự hỏi passcode. URL giờ là hằng số, bookmark/PWA giữ được.
+      // No more `?t=`: the page asks for the passcode itself. The URL is now constant, so bookmarks/PWAs keep working.
       const link=`http://${host}:${port}/`;
       const external=vscode.Uri.parse(link);
       await vscode.env.clipboard.writeText(link);
       output.appendLine(`mobile web app on ${link}`);
       const note=host!=='127.0.0.1'?'':lan?' (no private LAN address found — this machine only)'
         :' (loopback only — devHub.mobile.lan is off)';
-      // Port 0 lấy port rảnh mỗi lần activate, tức URL vừa copy sẽ chết sau Reload Window —
-      // đúng cái mà passcode ra đời để chấm dứt, nên phải nói ra chứ không để tự phát hiện.
+      // Port 0 takes a free port on every activate, i.e. the URL just copied dies after Reload Window —
+      // exactly what the passcode exists to end, so say it rather than leave it to be discovered.
       const drift=wanted?'':' — devHub.mobile.port is 0, so this URL dies on the next window reload';
       const pick=await vscode.window.showInformationMessage(`Dev Hub mobile URL copied${note} — ${link}${drift}`,'Open');
       if(pick==='Open')await vscode.env.openExternal(external);
     }catch(e:any){
       const msg=String(e?.message||e);
-      // Port ghim nên clash là chuyện thật (window thứ hai, tunnel host); nói port nào chứ
-      // đừng tự nhảy sang port khác — URL đã lưu trên điện thoại là cái đang bảo vệ.
+      // The port is pinned so a clash is real (a second window, a tunnel host); say which port rather
+      // than jumping to another one — the URL saved on the phone is what's being protected.
       if(/EADDRINUSE/.test(msg)){
         const go=await vscode.window.showErrorMessage(
           `Dev Hub: port ${conf.get('mobile.port',39642)} is already in use — something else (another window serving this page?) holds it. Free it, or change devHub.mobile.port.`,'Open Settings');
@@ -227,7 +227,7 @@ export async function activate(context:any){
     }
   }));
   context.subscriptions.push(vscode.commands.registerCommand('devhub.rotateMobileToken',async()=>{
-    // Cookie của mọi thiết bị trỏ tới token cũ; đổi token là đá tất cả ra, kể cả cái đã mất.
+    // Every device's cookie points at the old token; changing the token kicks them all out, including a lost one.
     if(!mobile)return void vscode.window.showInformationMessage('Dev Hub: the mobile web app is not running — nothing is signed in.');
     const pick=await vscode.window.showWarningMessage(
       'Sign every phone out of the Dev Hub mobile web app? Each one has to enter the passcode again.',{modal:true},'Sign out all');
@@ -237,7 +237,7 @@ export async function activate(context:any){
     vscode.window.showInformationMessage('Dev Hub: every device was signed out of the mobile web app.');
   }));
   let firstVisible=true;const openDevHub=async()=>{if(!firstVisible)return;firstVisible=false;void cliUpdate.refresh();await manager?.recoverStaleSessions();await refreshHistory();const key=context.globalState.get('devhub.lastSession');const restored=findRestorableSession(await sessionStore.list(),key as any);if(restored)await chat?.restoreSelection(restored);};treeView.onDidChangeVisibility(async(e:any)=>{if(e.visible)await openDevHub();});if(treeView.visible)void openDevHub();
-  // Chỉ báo khi session KHÔNG phải cái đang xem — cái đang xem thì mắt đã thấy rồi.
+  // Only notify when the session is NOT the one being viewed — that one the eye already sees.
   const notifyMode=()=>vscode.workspace.getConfiguration('devHub').get('notify','background');
   const nameOf=async(s:any)=>{const snap=await workspaces.snapshot();
     return snap.projects.find((p:any)=>p.id===s.projectId)?.name||s.cwd;};
@@ -253,9 +253,9 @@ export async function activate(context:any){
       .then((pick:any)=>{if(pick==='Open')void chat?.openSession(s);});
   });
   /**
-   * Reminder của planner: daemon tự đánh thức mình rồi nói vào hội thoại đã hẹn. Đây là đường
-   * DUY NHẤT nó nói trước — mọi thứ khác đều là Dev Hub hỏi. Không có tab nào mở thì `injectEvent`
-   * không ghi gì và daemon vẫn giữ lượt đó trong `/conversations`, nên lần mở sau vẫn đọc được.
+   * Planner reminder: the daemon wakes itself and speaks into the scheduled conversation. This is the
+   * ONLY path where it speaks first — everything else is Dev Hub asking. With no tab open `injectEvent`
+   * writes nothing and the daemon keeps that turn in `/conversations`, so the next open still reads it.
    */
   const plannerEndpoints=()=>{
     const conf=vscode.workspace.getConfiguration('devHub');
@@ -276,7 +276,7 @@ export async function activate(context:any){
     if(notifyMode()==='background'&&chat?.currentSessionId?.()===sessionId)return;
     const label=[push.jiraKey,push.note].filter(Boolean).join(' · ')||'scheduled check';
     const pick=await vscode.window.showInformationMessage(`Planner: ${label}`,'Open');
-    // Session chưa có trong store nghĩa là chưa ai mở tab đó; chạm vào hàng ở cây là được.
+    // A session not yet in the store means nobody has opened that tab; tapping the row in the tree is enough.
     if(pick==='Open'&&session)void chat?.openSession(session);
   },(line:string)=>output.appendLine(line));
   plannerWatch.watch(plannerEndpoints());

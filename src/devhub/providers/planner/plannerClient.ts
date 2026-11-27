@@ -1,12 +1,12 @@
 const http=require('node:http');
 
-/** Hàng `tasks` của daemon, đúng như `/tasks` trả về. Chỉ khai những cột UI dùng tới. */
+/** A daemon `tasks` row, exactly as `/tasks` returns it. Only the columns the UI uses are declared. */
 export interface PlannerTask {
   jira_key:string; status:string; summary?:string; plan_version?:number; confidence?:number;
   approved_plan_version?:number; affected_repos?:string[]; current_run_id?:number; last_error?:string;
   created_at?:number; updated_at?:number;
 }
-/** `payload` bên daemon là cột TEXT và API KHÔNG decode nó (chỉ task mới được decode). */
+/** The daemon's `payload` is a TEXT column and the API does NOT decode it (only task is decoded). */
 export interface PlannerEvent { id?:number; created_at?:number; jira_key?:string; kind:string; payload?:any; }
 
 export function parsePayload(raw:any){
@@ -16,19 +16,19 @@ export function parsePayload(raw:any){
 }
 
 /**
- * HTTP client của agent-planner. Tách khỏi provider vì cây và các lệnh duyệt
- * cũng cần nói chuyện với daemon, mà chúng không có lượt chat nào để mượn.
+ * HTTP client for agent-planner. Separate from the provider because the tree and the approval commands
+ * also need to talk to the daemon, and they have no chat turn to borrow.
  *
- * Không auth — chấp nhận được vì loopback, và CHỈ vì loopback.
+ * No auth — acceptable because it is loopback, and ONLY because it is loopback.
  */
 export class PlannerClient {
   constructor(public endpoint='http://127.0.0.1:7341', private timeoutMs=15000){}
   private url(p:string){return `${this.endpoint.replace(/\/$/,'')}${p}`;}
 
   /**
-   * `onRequest` nhận chính `ClientRequest`: daemon không có endpoint huỷ, nên đường duy nhất
-   * để một `cancel()` thoát khỏi `POST /chat` không hạn là destroy request từ bên ngoài.
-   * Phải destroy KÈM error — `req.destroy()` trần không emit 'error', promise sẽ không settle.
+   * `onRequest` receives the `ClientRequest` itself: the daemon has no cancel endpoint, so the only way
+   * for `cancel()` to escape an unbounded `POST /chat` is to destroy the request from outside.
+   * It must be destroyed WITH an error — a bare `req.destroy()` emits no 'error' and the promise never settles.
    */
   request(method:string,p:string,body?:any,timeoutMs?:number,onRequest?:(req:any)=>void):Promise<{status:number;reason:string;text:string}>{
     return new Promise((resolve,reject)=>{
@@ -48,9 +48,9 @@ export class PlannerClient {
 
   async json<T>(method:string,p:string,body?:any,timeoutMs?:number,onRequest?:(req:any)=>void):Promise<T>{
     const {status,reason,text}=await this.request(method,p,body,timeoutMs,onRequest);
-    // 409 là câu trả lời THẬT của daemon (approve sai version, preflight từ chối), không
-    // phải lỗi mạng — và `reason` nằm ở STATUS LINE, body thường rỗng. Bỏ nó đi là báo
-    // "409:" trống trơn cho đúng cái câu duy nhất giải thích được chuyện gì xảy ra.
+    // 409 is a REAL answer from the daemon (approve with a wrong version, preflight refused), not
+    // a network error — and `reason` is in the STATUS LINE, the body is usually empty. Dropping it reports
+    // a bare "409:" in place of the only sentence that explains what happened.
     if(status<200||status>=300)throw new Error(`${method} ${p} -> ${status}: ${(text||reason).slice(0,200)}`);
     return JSON.parse(text||'{}') as T;
   }
@@ -67,34 +67,34 @@ export class PlannerClient {
     return rows.map(e=>({...e,payload:parsePayload(e.payload)}));
   }
   /**
-   * Lượt đã lưu của một hội thoại. Phiên sống nằm trong bộ nhớ daemon; đây là nửa BỀN, và là
-   * đường duy nhất để đọc lại một reminder đã nổ lúc không có tab nào mở.
+   * A conversation's saved turns. The live session lives in the daemon's memory; this is the DURABLE half, and the
+   * only way to read back a reminder that fired while no tab was open.
    */
   async messages(conversationId:string,limit=200){
     return (await this.json<{messages:Array<{role:string;text:string;created_at?:number}>}>(
       'GET',`/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`)).messages||[];
   }
   async refresh(key:string){return this.json<PlannerTask>('POST',`/tasks/${encodeURIComponent(key)}/refresh`,{},30000);}
-  /** `plan_version` bắt buộc và daemon KHÔNG tự lấy version hiện tại — đừng mặc định hộ nó. */
+  /** `plan_version` is required and the daemon does NOT fill in the current version — don't default it for them. */
   async approve(key:string,planVersion:number){return this.json<PlannerTask>('POST',`/tasks/${encodeURIComponent(key)}/approve`,{plan_version:planVersion});}
   async reject(key:string,reason:string){return this.json<PlannerTask>('POST',`/tasks/${encodeURIComponent(key)}/reject`,{reason});}
-  /** Khác reject: reject đẩy về ANALYZING (deep-plan lại, $5-7). Dismiss kết thúc task, $0. */
+  /** Unlike reject: reject sends it back to ANALYZING (deep-plans again, $5-7). Dismiss ends the task, $0. */
   async dismiss(key:string,reason:string){return this.json<PlannerTask>('POST',`/tasks/${encodeURIComponent(key)}/dismiss`,{reason});}
   async revive(key:string){return this.json<PlannerTask>('POST',`/tasks/${encodeURIComponent(key)}/revive`,{});}
   /**
-   * KHÔNG đặt hạn: `POST /execute` await CẢ lượt implement (`daemon.execute` -> `execute_task`),
-   * tức tới 5 vòng fix, mỗi vòng một brain turn hạn 1200s. Hạn 120s của bản cũ báo lỗi giả
-   * trong khi daemon vẫn đang ghi commit, và người dùng thấy lỗi thì bấm lại.
+   * NO timeout: `POST /execute` awaits the WHOLE implement run (`daemon.execute` -> `execute_task`),
+   * i.e. up to 5 fix rounds, each a brain turn with a 1200s limit. The old 120s timeout reported a false error
+   * while the daemon was still committing, and users who saw the error clicked again.
    */
   async execute(key:string){return this.json<PlannerTask>('POST',`/tasks/${encodeURIComponent(key)}/execute`,{},0);}
   async stopRun(runId:number){return this.json<any>('POST',`/runs/${runId}/stop`,{});}
 
-  /** SSE bus dùng chung cho mọi client; caller tự lọc theo conversation_id. */
+  /** One SSE bus shared by every client; the caller filters by conversation_id. */
   stream(onChunk:(text:string)=>void,onOpen?:()=>void){
     const req=http.request(this.url('/stream'),{method:'GET'},(res:any)=>{
       res.setEncoding('utf8');res.on('data',onChunk);res.on('error',()=>{});onOpen?.();
     });
-    req.on('error',()=>onOpen?.());   // không có stream vẫn chat được, chỉ mất phần chạy dở
+    req.on('error',()=>onOpen?.());   // chat still works without the stream, it only loses the in-progress part
     req.end();
     return req;
   }

@@ -44,7 +44,7 @@ test('claude parser opens a tool row at content_block_start and refines it once'
   assert.deepEqual(early.map((e:any)=>[e.type,e.command,e.callId]),[['command_started','','toolu_1']]);
   const full=parser.parse({type:'assistant',message:{content:[{type:'tool_use',id:'toolu_1',name:'Bash',input:{command:'ls -la'}}]}});
   assert.deepEqual(full.map((e:any)=>[e.type,e.command,e.callId]),[['command_started','ls -la','toolu_1']]);
-  // Lượt sau tái dùng id thì phải mở lại được dòng mới.
+  // A later turn reusing the id must be able to open a new row.
   parser.parse({type:'user',message:{content:[{type:'tool_result',tool_use_id:'toolu_1',content:'ok'}]}});
   const again=parser.parse({type:'stream_event',event:{type:'content_block_start',index:0,
     content_block:{type:'tool_use',id:'toolu_1',name:'Bash',input:{}}}});
@@ -73,19 +73,19 @@ test('claude parser reads the real exit code out of a failed Bash result', () =>
 
   parser.parse({type:'assistant',message:{content:[{type:'tool_use',id:'b2',name:'Bash',input:{command:'false'}}]}});
   const noCode=parser.parse({type:'user',message:{content:[{type:'tool_result',tool_use_id:'b2',is_error:true,content:'boom'}]}});
-  assert.equal((noCode.find((e:any)=>e.type==='command_completed') as any).exitCode,1,'không đọc được thì vẫn phải khác 0');
+  assert.equal((noCode.find((e:any)=>e.type==='command_completed') as any).exitCode,1,'unreadable must still be non-zero');
 
   parser.parse({type:'assistant',message:{content:[{type:'tool_use',id:'b3',name:'Bash',input:{command:'true'}}]}});
   const ok=parser.parse({type:'user',message:{content:[{type:'tool_result',tool_use_id:'b3',content:'Exit code 0'}]}});
-  assert.equal((ok.find((e:any)=>e.type==='command_completed') as any).exitCode,undefined,'lệnh pass không được gắn exit code');
+  assert.equal((ok.find((e:any)=>e.type==='command_completed') as any).exitCode,undefined,'a passing command gets no exit code');
 });
 
 /**
- * Sub-agent của Claude tên tool là `Agent` (`Task` là tên cũ) và input chỉ có
- * description/subagent_type/prompt — không khớp nhánh path/command/query nào, nên nhãn từng rơi
- * về đúng tên tool: hai lần spawn khác hẳn nhau mà cùng đọc ra "Agent (Agent)".
+ * Claude's sub-agent tool is named `Agent` (`Task` is the old name) and its input only has
+ * description/subagent_type/prompt — it matches no path/command/query branch, so the label used to fall
+ * back to the tool name: two entirely different spawns both read "Agent (Agent)".
  */
-test('một sub-agent của Claude hiện mô tả và loại agent, không phải hai chữ Agent',()=>{
+test('a Claude sub-agent shows its description and agent type, not the word Agent twice',()=>{
   const p=new ClaudeEventParser();
   const [started]=p.parse({type:'assistant',message:{content:[{type:'tool_use',id:'t1',name:'Agent',
     input:{description:'Independent review of T813 PR',subagent_type:'general-purpose',prompt:'…'}}]}}) as any[];
@@ -94,7 +94,7 @@ test('một sub-agent của Claude hiện mô tả và loại agent, không ph�
   assert.equal(started.label,'Independent review of T813 PR (general-purpose)');
 });
 
-test('thiếu mô tả thì vẫn không tệ hơn trước',()=>{
+test('without a description it is still no worse than before',()=>{
   const p=new ClaudeEventParser();
   const [a]=p.parse({type:'assistant',message:{content:[{type:'tool_use',id:'t2',name:'Task',
     input:{subagent_type:'Explore'}}]}}) as any[];
@@ -105,12 +105,12 @@ test('thiếu mô tả thì vẫn không tệ hơn trước',()=>{
 });
 
 /**
- * Ghi lại từ stdout THẬT của `claude --print --output-format stream-json --include-partial-messages`
- * khi lượt chính spawn một sub-agent nền: stream của con ra cùng một đường ống, chỉ khác ở
- * `parent_tool_use_id`. Trước bản vá, lời của con thành bong bóng của cha và dòng tool của con
- * cắt đôi đoạn cha đang stream giữa từ.
+ * Recorded from the REAL stdout of `claude --print --output-format stream-json --include-partial-messages`
+ * when the main turn spawns a background sub-agent: the child's stream comes down the same pipe, differing only in
+ * `parent_tool_use_id`. Before the fix, the child's words became the parent's bubble and the child's tool rows
+ * split the parent's streaming text mid-word.
  */
-test('sub-agent nền không chen vào dòng chính',()=>{
+test('a background sub-agent does not cut into the main stream',()=>{
   const p=new ClaudeEventParser();
   p.parse({type:'assistant',message:{content:[{type:'tool_use',id:'toolu_p',name:'Agent',
     input:{description:'Count .txt files',subagent_type:'general-purpose'}}]}});
@@ -122,8 +122,8 @@ test('sub-agent nền không chen vào dòng chính',()=>{
     message:{content:[{type:'tool_result',tool_use_id:'toolu_c',content:'3'}]}}),[]);
 });
 
-/** Lượt gọi nền: `tool_result` chỉ là biên nhận, output thật tới ở `task_notification`. */
-test('dòng Agent nền chạy theo task_* chứ không đóng bằng biên nhận',()=>{
+/** A background call: `tool_result` is only a receipt, the real output arrives in `task_notification`. */
+test('a background Agent row follows task_* and is not closed by the receipt',()=>{
   const p=new ClaudeEventParser();
   p.parse({type:'assistant',message:{content:[{type:'tool_use',id:'toolu_p',name:'Agent',
     input:{description:'Count .txt files',subagent_type:'general-purpose'}}]}});
@@ -132,7 +132,7 @@ test('dòng Agent nền chạy theo task_* chứ không đóng bằng biên nh�
   assert.equal(started.length,1);
   assert.equal(started[0].type,'tool_started');
   assert.equal(started[0].callId,'toolu_p');
-  // Biên nhận "Async agent launched successfully…" KHÔNG được đóng dòng.
+  // The "Async agent launched successfully…" receipt must NOT close the row.
   assert.deepEqual(p.parse({type:'user',message:{content:[{type:'tool_result',tool_use_id:'toolu_p',
     content:'Async agent launched successfully.'}]}}),[]);
   const progress=p.parse({type:'system',subtype:'task_progress',tool_use_id:'toolu_p',
@@ -151,50 +151,50 @@ test('dòng Agent nền chạy theo task_* chứ không đóng bằng biên nh�
 });
 
 /**
- * `task_notification` của một task còn sót từ phiên TRƯỚC (CLI báo lại lúc resume) không có dòng
- * nào để bám. Dựng dòng mới cho nó là chèn ngang vào giữa đoạn đang stream.
+ * A `task_notification` for a task left over from a PREVIOUS session (the CLI re-reports it on resume) has no row
+ * to attach to. Building a new row for it cuts into the middle of the streaming text.
  */
-test('task_* của id lạ bị bỏ, không dựng dòng Agent ma',()=>{
+test('task_* for an unknown id is dropped, no ghost Agent row',()=>{
   const p=new ClaudeEventParser();
-  assert.deepEqual(p.parse({type:'system',subtype:'task_notification',tool_use_id:'toolu_cũ',
+  assert.deepEqual(p.parse({type:'system',subtype:'task_notification',tool_use_id:'toolu_old',
     status:'stopped',summary:''}),[]);
-  assert.deepEqual(p.parse({type:'system',subtype:'task_progress',tool_use_id:'toolu_cũ'}),[]);
+  assert.deepEqual(p.parse({type:'system',subtype:'task_progress',tool_use_id:'toolu_old'}),[]);
 });
 
-test('hàng <synthetic> trả lời lượt CLI tự chèn không được vẽ như lời agent',()=>{
-  // Payload thật: "Continue from where you left off." (isMeta, đã lọc ở 0.29.52) được đáp
-  // bằng hàng này. Vẽ ra thì mở lại tab đọc y như câu vừa gửi bị chặn.
+test('a <synthetic> row answering a CLI-inserted turn is not drawn as the agent speaking',()=>{
+  // Real payload: "Continue from where you left off." (isMeta, filtered since 0.29.52) is answered
+  // with this row. Drawing it makes a reopened tab read as if the message just sent had been blocked.
   const ghost=parseClaudeEvent({type:'assistant',message:{model:'<synthetic>',role:'assistant',
     stop_reason:'stop_sequence',content:[{type:'text',text:'No response requested.'}]}});
-  assert.deepEqual(ghost,[],'không được sinh event nào');
+  assert.deepEqual(ghost,[],'must emit no event');
 
-  // Nhưng lỗi THẬT cũng là <synthetic>; mất nó thì hết quota trông y như treo.
+  // But REAL errors are <synthetic> too; losing them makes an exhausted quota look like a hang.
   const limit=parseClaudeEvent({type:'assistant',isApiErrorMessage:true,error:'rate_limit',apiErrorStatus:429,
     message:{model:'<synthetic>',role:'assistant',content:[{type:'text',text:"You've hit your weekly limit · resets 10pm (Asia/Saigon)"}]}});
   assert.equal(limit.length,1);
   assert.equal(limit[0].type,'assistant_message');
   assert.match((limit[0] as any).text,/weekly limit/);
 
-  // Output lệnh local (`/context`) cũng là <synthetic> không cờ lỗi — nuốt nó là lượt "done sau 0s" trắng.
+  // Local command output (`/context`) is also <synthetic> without the error flag — swallowing it gives a blank "done after 0s" turn.
   const local=parseClaudeEvent({type:'assistant',message:{model:'<synthetic>',role:'assistant',stop_reason:'end_turn',
     content:[{type:'text',text:'## Context Usage\n\n**Tokens:** 13.9k / 1m (1%)'}]}});
   assert.equal(local.length,1);
   assert.match((local[0] as any).text,/Context Usage/);
 
-  // Model thật vẫn đi qua như cũ.
+  // Real models still pass through as before.
   const real=parseClaudeEvent({type:'assistant',message:{model:'claude-opus-5',role:'assistant',
     content:[{type:'text',text:'hi'}]}});
   assert.equal(real.length,1);
 });
 
-test('system/init mang id model thật để chip không chỉ hiện alias', () => {
+test('system/init carries the real model id so the chip shows more than the alias', () => {
   assert.deepEqual(parseClaudeEvent({type:'system',subtype:'init',session_id:'s',model:'claude-opus-5-5'}).map((e:any)=>e.usage),[{model:'claude-opus-5-5'}]);
-  assert.equal(parseClaudeEvent({type:'system',subtype:'init',session_id:'s'}).length,0,'thiếu model thì không phát usage rỗng');
+  assert.equal(parseClaudeEvent({type:'system',subtype:'init',session_id:'s'}).length,0,'no model means no empty usage event');
 });
 
-test('thinking có chữ (câu tiến độ của Opus 5.5) hiện ra; thinking rỗng bị bịt thì vẫn bỏ', () => {
-  const note=parseClaudeEvent({type:'assistant',message:{model:'claude-opus-5-5',content:[{type:'thinking',thinking:'Kiểm tra parser trước.\n',signature:'x'}]}});
-  assert.deepEqual(note.map((e:any)=>[e.type,e.text]),[['assistant_message','Kiểm tra parser trước.']]);
+test('thinking with text (Opus 5.5 progress sentence) shows; redacted empty thinking is still dropped', () => {
+  const note=parseClaudeEvent({type:'assistant',message:{model:'claude-opus-5-5',content:[{type:'thinking',thinking:'Check the parser first.\n',signature:'x'}]}});
+  assert.deepEqual(note.map((e:any)=>[e.type,e.text]),[['assistant_message','Check the parser first.']]);
   assert.equal(parseClaudeEvent({type:'assistant',message:{model:'claude-opus-5',content:[{type:'thinking',thinking:'',signature:'x'}]}}).length,0);
   assert.equal(parseClaudeEvent({type:'assistant',message:{content:[{type:'thinking',thinking:'  \n'}]}}).length,0);
 });
@@ -210,7 +210,7 @@ test('claude parser surfaces images from tool_result as assistant_image', () => 
   assert.equal(out[0].type,'tool_completed');
   assert.equal((out[0] as any).summary,'Took the screenshot');
   const imgs=out.filter((e:any)=>e.type==='assistant_image') as any[];
-  assert.deepEqual(imgs.map(e=>e.src),['data:image/png;base64,iVBORw0KGgo='],'chỉ nhận base64 raster, bỏ svg và url');
+  assert.deepEqual(imgs.map(e=>e.src),['data:image/png;base64,iVBORw0KGgo='],'only base64 rasters are accepted, svg and url are dropped');
 });
 
 test('claude parser spills tool images to a content-addressed file instead of a data URI', () => {
@@ -220,10 +220,10 @@ test('claude parser spills tool images to a content-addressed file instead of a 
     const shot=(id:string)=>({type:'user',message:{content:[{type:'tool_result',tool_use_id:id,content:[
       {type:'image',source:{type:'base64',media_type:'image/png',data:'iVBORw0KGgo='}}]}]}});
     const a=new ClaudeEventParser(dir).parse(shot('s1')).find((e:any)=>e.type==='assistant_image') as any;
-    assert.equal(a.src,undefined,'không còn data URI đi trong event');
+    assert.equal(a.src,undefined,'no data URI travels in events any more');
     assert.ok(a.path.startsWith(dir+path.sep)&&a.path.endsWith('.png'));
     assert.deepEqual(fs.readFileSync(a.path),Buffer.from('iVBORw0KGgo=','base64'));
-    // Đọc lại transcript (parser mới) phải trỏ cùng file, không đẻ thêm.
+    // Re-reading the transcript (new parser) must point at the same file, not create another.
     const b=new ClaudeEventParser(dir).parse(shot('s2')).find((e:any)=>e.type==='assistant_image') as any;
     assert.equal(b.path,a.path);
     assert.deepEqual(fs.readdirSync(dir),[path.basename(a.path)]);

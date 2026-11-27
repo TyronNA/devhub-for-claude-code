@@ -2,15 +2,15 @@ import { PlannerClient } from './plannerClient';
 import { parseSseFrame, sseFrames } from './plannerProvider';
 
 /**
- * SSE sống suốt phiên tới daemon planner — mảnh còn thiếu để daemon nói TRƯỚC.
+ * A session-long SSE to the planner daemon — the missing piece that lets the daemon speak FIRST.
  *
- * `PlannerProvider` cũng mở `/stream`, nhưng chỉ TRONG một lượt và chỉ để nghe `permission`;
- * hết lượt là đóng. Nên một reminder tự nổ (daemon đánh thức chính nó, `planner/reminders.py`)
- * không có đường nào tới được UI. Cái này giữ ống mở khi không có lượt nào.
+ * `PlannerProvider` also opens `/stream`, but only DURING a turn and only to listen for `permission`;
+ * it closes when the turn ends. So a self-firing reminder (the daemon waking itself, `planner/reminders.py`)
+ * had no way to reach the UI. This keeps the pipe open when no turn is running.
  *
- * Chỉ đọc frame `reminder_fired`, CÓ CHỦ Ý: `view` là một message bị edit tại chỗ (xem
- * `plannerProvider`), nối thêm là ra chuỗi rác, còn `message` chỉ mang placeholder "⏳". Câu trả
- * lời đầy đủ nằm trong payload của `reminder_fired`.
+ * Only reads `reminder_fired` frames, ON PURPOSE: `view` is a message edited in place (see
+ * `plannerProvider`), appending gives a garbage string, and `message` only carries a "⏳" placeholder. The full
+ * answer is in the `reminder_fired` payload.
  */
 
 export interface PlannerReminderPush {
@@ -18,7 +18,7 @@ export interface PlannerReminderPush {
   note:string; jiraKey?:string; reply:string; movedFrom?:string; movedTo?:string;
 }
 
-/** Nối lại sau khi đứt: daemon restart (`make restart`) là chuyện thường ngày. */
+/** Reconnect after a drop: a daemon restart (`make restart`) is an everyday thing. */
 const RETRY_MS=[1000,2000,5000,15000,30000];
 
 export class PlannerWatcher {
@@ -26,7 +26,7 @@ export class PlannerWatcher {
   private disposed=false;
   constructor(private onReminder:(push:PlannerReminderPush)=>void,private log?:(line:string)=>void){}
 
-  /** Danh sách endpoint là nguồn chuẩn: gọi lại khi settings đổi, cái mất thì đóng. */
+  /** The endpoint list is the source of truth: call again when settings change; missing ones get closed. */
   watch(endpoints:string[]){
     if(this.disposed)return;
     const wanted=new Set(endpoints.filter(Boolean));
@@ -49,13 +49,13 @@ export class PlannerWatcher {
       if(this.disposed||state.closed)return;
       let buf='';
       const client=new PlannerClient(ep);
-      // Không đặt timeout cho `/stream`: một ống im lặng 25s là bình thường (heartbeat của
-      // daemon), còn `request({timeout})` sẽ cắt nó.
+      // No timeout on `/stream`: a pipe silent for 25s is normal (the daemon's
+      // heartbeat), and `request({timeout})` would cut it.
       state.req=client.stream((chunk:string)=>{
         state.tries=0;
-        // Log theo CHUYỂN TRẠNG THÁI, không theo mỗi lần thử: daemon tắt hẳn thì retry 30s/lần
-        // là vĩnh viễn, in mỗi lần một dòng sẽ nhấn chìm mọi dòng log khác của extension.
-        if(state.down){state.down=false;this.log?.(`planner watch ${ep} nối lại được`);}
+        // Log STATE TRANSITIONS, not every attempt: with the daemon fully off, a retry every 30s
+        // goes on forever, and a line each time would drown every other log line of the extension.
+        if(state.down){state.down=false;this.log?.(`planner watch ${ep} reconnected`);}
         buf+=chunk;
         const batch=sseFrames(buf);buf=batch.rest;
         for(const raw of batch.frames){
@@ -70,7 +70,7 @@ export class PlannerWatcher {
             movedTo:moved?String(moved[1]):undefined});
         }
       });
-      // `error` và `close` cùng nổ khi daemon chết giữa stream: nối lại HAI lần là hai ống.
+      // `error` and `close` both fire when the daemon dies mid-stream: reconnecting TWICE means two pipes.
       let retried=false;
       const retry=()=>{
         if(this.disposed||state.closed||retried)return;
@@ -79,7 +79,7 @@ export class PlannerWatcher {
         state.timer=setTimeout(connect,wait);state.timer?.unref?.();
       };
       state.req.on('error',(e:any)=>{
-        if(!state.down){state.down=true;this.log?.(`planner watch ${ep} error: ${e?.message||e} — im lặng tới khi nối lại được`);}
+        if(!state.down){state.down=true;this.log?.(`planner watch ${ep} error: ${e?.message||e} — silent until it reconnects`);}
         retry();});
       state.req.on('close',retry);
     };

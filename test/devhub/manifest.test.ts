@@ -12,17 +12,17 @@ test('every menu command has an icon so inline buttons never render as text over
   const menus=pkg.contributes.menus||{};
   const placed=new Set<string>();
   for(const list of Object.values<any>(menus)) for(const m of list) placed.add(m.command);
-  assert.ok(placed.size>0,'phải có lệnh gắn vào menu');
+  assert.ok(placed.size>0,'must have commands attached to menus');
   for(const id of placed){
     const c:any=byId.get(id);
-    assert.ok(c,`lệnh ${id} nằm trong menu nhưng chưa khai báo`);
-    // Không icon => VS Code in nguyên title, đè lên tên project trong tree.
+    assert.ok(c,`command ${id} is in a menu but not declared`);
+    // No icon => VS Code prints the whole title, covering the project name in the tree.
     const ic=c.icon;
-    if(typeof ic==='string'){assert.ok(ic.startsWith('$('),`lệnh ${id} icon phải là codicon`);}
+    if(typeof ic==='string'){assert.ok(ic.startsWith('$('),`command ${id} icon must be a codicon`);}
     else{
-      assert.ok(ic&&ic.light&&ic.dark,`lệnh ${id} thiếu icon`);
+      assert.ok(ic&&ic.light&&ic.dark,`command ${id} is missing an icon`);
       for(const f of [ic.light,ic.dark])
-        assert.ok(fs.existsSync(path.join(process.cwd(),f)),`lệnh ${id} trỏ tới file không tồn tại: ${f}`);
+        assert.ok(fs.existsSync(path.join(process.cwd(),f)),`command ${id} points at a missing file: ${f}`);
     }
   }
 });
@@ -30,8 +30,8 @@ test('every menu command has an icon so inline buttons never render as text over
 test('command titles keep the Dev Hub prefix for the palette but expose a short form for menus',()=>{
   const pkg=JSON.parse(fs.readFileSync(path.join(process.cwd(),'package.json'),'utf8'));
   for(const c of pkg.contributes.commands){
-    assert.ok(String(c.title).startsWith('Dev Hub: '),`${c.command} phải có tiền tố Dev Hub:`);
-    assert.ok(c.shortTitle&&!String(c.shortTitle).includes('Dev Hub'),`${c.command} thiếu shortTitle gọn`);
+    assert.ok(String(c.title).startsWith('Dev Hub: '),`${c.command} must have the Dev Hub: prefix`);
+    assert.ok(c.shortTitle&&!String(c.shortTitle).includes('Dev Hub'),`${c.command} is missing a short shortTitle`);
   }
 });
 
@@ -39,18 +39,18 @@ test('command titles keep the Dev Hub prefix for the palette but expose a short 
 test('brand icons are packaged',()=>{
   const media=path.join(process.cwd(),'media');
   const pkg=JSON.parse(fs.readFileSync(path.join(process.cwd(),'package.json'),'utf8'));
-  assert.ok(pkg.files.includes('media'),'media phải nằm trong "files" nếu không VSIX sẽ thiếu icon');
+  assert.ok(pkg.files.includes('media'),'media must be in "files" or the VSIX will lack icons');
   for(const n of ['claude-light.svg','claude-dark.svg'])
-    assert.ok(fs.existsSync(path.join(media,n)),'thiếu '+n);
+    assert.ok(fs.existsSync(path.join(media,n)),'missing '+n);
 });
 
 test('the agents list ships empty so no personal paths leak, but the commands are there',()=>{
   const pkg=JSON.parse(fs.readFileSync(path.join(process.cwd(),'package.json'),'utf8'));
   const agents=pkg.contributes.configuration.properties['devHub.agents'];
-  assert.deepEqual(agents.default,[],'default phải rỗng — path máy cá nhân thuộc về settings của người dùng');
-  assert.ok(/my-bot/.test(agents.markdownDescription),'mô tả phải có ví dụ trung tính');
+  assert.deepEqual(agents.default,[],'default must be empty — personal machine paths belong in the user\'s settings');
+  assert.ok(/my-bot/.test(agents.markdownDescription),'the description must have a neutral example');
   for(const c of ['devhub.startAgent','devhub.stopAgent','devhub.restartAgent','devhub.openAgentLogs'])
-    assert.ok(pkg.contributes.commands.some((x:any)=>x.command===c),'thiếu lệnh '+c);
+    assert.ok(pkg.contributes.commands.some((x:any)=>x.command===c),'missing command '+c);
 });
 
 test('session switching is bound to keys and notifications default to background only',()=>{
@@ -60,7 +60,7 @@ test('session switching is bound to keys and notifications default to background
   assert.equal(keys['devhub.previousRunning'],'cmd+shift+[');
   assert.equal(keys['devhub.focusView'],'cmd+k cmd+a');
   const notify=pkg.contributes.configuration.properties['devHub.notify'];
-  assert.equal(notify.default,'background','mặc định chỉ báo session không đang xem');
+  assert.equal(notify.default,'background','by default only notify for sessions not being viewed');
   assert.deepEqual(notify.enum,['off','background','always']);
 });
 
@@ -68,51 +68,65 @@ test('README documents every setting and command the manifest ships',()=>{
   const pkg=JSON.parse(fs.readFileSync(path.join(process.cwd(),'package.json'),'utf8'));
   const readme=fs.readFileSync(path.join(process.cwd(),'docs','DESIGN.md'),'utf8');
   for(const k of Object.keys(pkg.contributes.configuration.properties))
-    assert.ok(readme.includes(k),'README thiếu setting '+k);
+    assert.ok(readme.includes(k),'README is missing setting '+k);
   for(const c of pkg.contributes.commands)
-    assert.ok(readme.includes(c.command),'README thiếu command '+c.command);
-  // Tài liệu hay mục nhất ở chỗ mô tả kiến trúc — khoá lại vài điểm neo.
-  assert.ok(readme.includes('--input-format stream-json'),'phải mô tả transport hiện tại');
-  assert.ok(readme.includes('--permission-prompt-tool stdio'),'phải mô tả luồng duyệt quyền');
-  assert.equal(/One shared Dev Hub chat tab/.test(readme),false,'còn sót mô tả single-tab cũ');
+    assert.ok(readme.includes(c.command),'README is missing command '+c.command);
+  // Docs rot fastest where they describe architecture — pin a few anchors.
+  assert.ok(readme.includes('--input-format stream-json'),'must describe the current transport');
+  assert.ok(readme.includes('--permission-prompt-tool stdio'),'must describe the permission flow');
+  assert.equal(/One shared Dev Hub chat tab/.test(readme),false,'leftover description of the old single-tab design');
 });
 
 test('CHANGELOG covers the shipped version',()=>{
   const pkg=JSON.parse(fs.readFileSync(path.join(process.cwd(),'package.json'),'utf8'));
   const log=fs.readFileSync(path.join(process.cwd(),'CHANGELOG.md'),'utf8');
-  assert.ok(log.includes('## '+pkg.version),'CHANGELOG thiếu '+pkg.version);
+  assert.ok(log.includes('## '+pkg.version),'CHANGELOG is missing '+pkg.version);
 });
 
 test('nothing in the repo names a private workspace or a personal path',()=>{
   const root=process.cwd();
   for(const f of ['package.json','README.md','CHANGELOG.md','docs/DESIGN.md']){
     const t=fs.readFileSync(path.join(root,f),'utf8');
-    // Repo có thể public lại bất cứ lúc nào; giữ nó trung tính từ đầu.
-    assert.equal(/\/Users\/[a-z]/.test(t),false,f+' còn đường dẫn máy cá nhân');
+    // The repo is public; keep it neutral.
+    assert.equal(/\/Users\/[a-z]/.test(t),false,f+' still has a personal machine path');
   }
+});
+
+test('comments, strings and docs are English only',()=>{
+  const root=process.cwd(),bad:string[]=[];
+  // Escapes, not literals: the letters only Vietnamese uses (a-breve, d-stroke, o/u-horn + the U+1EA0 block), so this file passes its own check.
+  const VI=new RegExp('[\\u0103\\u0110\\u0111\\u01a1\\u01b0\\u1ea0-\\u1ef9]');
+  const walk=(d:string)=>{for(const e of fs.readdirSync(path.join(root,d),{withFileTypes:true})){
+    const p=d?d+'/'+e.name:e.name;
+    if(e.isDirectory()){if(!['node_modules','dist','.git','images','.playwright-mcp'].includes(e.name))walk(p);continue;}
+    if(!/\.(ts|js|css|html|md|json|yml)$/.test(e.name))continue;
+    fs.readFileSync(path.join(root,p),'utf8').split('\n').forEach((l:string,i:number)=>{if(VI.test(l))bad.push(p+':'+(i+1));});
+  }};
+  walk('');
+  assert.deepEqual(bad,[],'non-English text found');
 });
 
 test('the webview assets live in media/ and actually ship',()=>{
   const root=process.cwd();
-  // CSP là default-src 'none' và localResourceRoots rỗng: webview không tự nạp file được,
-  // host phải đọc rồi nhúng. Thiếu file thì panel trắng, nên khoá cả hai đầu lại.
+  // CSP is default-src 'none' and localResourceRoots is empty: the webview can't load files itself,
+  // the host must read and inline them. A missing file means a blank panel, so pin both ends.
   for(const rel of ['media/webview/chat.js','media/webview/chat.css']){
     const st=fs.statSync(path.join(root,rel));
-    assert.ok(st.size>2000,rel+' quá nhỏ, chắc bị ghi rỗng');
+    assert.ok(st.size>2000,rel+' is too small, probably written empty');
   }
   const provider=fs.readFileSync(path.join(root,'src/devhub/views/chatPanelProvider.ts'),'utf8');
-  assert.ok(provider.includes("'media','webview'"),'provider phải đọc từ media/webview');
-  assert.equal(/const (css|script)=`/.test(provider),false,'không được nhúng lại css/js vào file TS');
+  assert.ok(provider.includes("'media','webview'"),'the provider must read from media/webview');
+  assert.equal(/const (css|script)=`/.test(provider),false,'css/js must not be inlined back into a TS file');
 
   const pack=fs.readFileSync(path.join(root,'scripts/package-vsix.js'),'utf8');
-  assert.ok(/'media'/.test(pack),'vsix phải copy media');
-  assert.ok(pack.includes('Extension="css"'),'[Content_Types].xml phải khai css');
+  assert.ok(/'media'/.test(pack),'the vsix must copy media');
+  assert.ok(pack.includes('Extension="css"'),'[Content_Types].xml must declare css');
 });
 
 test('the shipped webview script is valid JavaScript on its own',()=>{
   const src=fs.readFileSync(path.join(process.cwd(),'media/webview/chat.js'),'utf8');
-  // Trước đây script nằm trong template literal của TS: một backtick lẻ trong comment là
-  // đóng chuỗi và hỏng build. Giờ là file thật nên kiểm tra trực tiếp.
+  // The script used to live in a TS template literal: a stray backtick in a comment
+  // closed the string and broke the build. Now it is a real file, so check it directly.
   new (require('node:vm').Script)(src);
   assert.ok(src.includes('acquireVsCodeApi'));
 });

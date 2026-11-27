@@ -6,9 +6,9 @@ const crypto=require('node:crypto');
 
 function now(){return Date.now();}
 function labelTool(name:string,input:any){ if(!input) return name;
-  // Sub-agent của Claude (`Agent`, tên cũ `Task`): input KHÔNG có path/command/query nào, nên
-  // nhãn rơi về đúng tên tool và dòng đọc ra "Agent (Agent)" — hai lần spawn khác nhau trông y
-  // hệt. `description` + loại agent mới là thứ phân biệt được.
+  // Claude's sub-agent (`Agent`, formerly `Task`): its input has NO path/command/query, so
+  // the label falls back to the tool name and the row reads "Agent (Agent)" — two different spawns look
+  // identical. `description` + the agent type are what tell them apart.
   if(name==='Agent'||name==='Task'){
     const what=String(input.description||'').trim();
     const kind=String(input.subagent_type||'').trim();
@@ -26,19 +26,19 @@ function resultText(content:any):string|undefined {
   }
 }
 /**
- * Ảnh trong `tool_result` (screenshot Playwright, Read file PNG) về dạng block base64; `resultText`
- * chỉ nhặt chữ nên trước đây ảnh rơi mất và agent chụp xong người dùng không thấy gì.
+ * Images in a `tool_result` (a Playwright screenshot, Read on a PNG) arrive as base64 blocks; `resultText`
+ * only picks up text, so images used to be dropped and the user saw nothing after the agent took a screenshot.
  *
- * Ghi ra file thay vì giữ data: URI. Data URI đi nguyên trong `sessionSelected` — một gói SSE/
- * postMessage duy nhất gửi lại MỖI lần mở tab hay nối lại: transcript playtest đo được 8–10 MB
- * base64 trong 16 MB đuôi, điện thoại tải + giải mã hết trước khi vẽ dòng đầu. Có `path` thì host
- * đổi sang URL (`asWebviewUri` / `/api/file`), `<img loading=lazy>` chỉ tải ảnh đang hiện và
- * trình duyệt cache được. Tên = sha1 nội dung ⇒ đọc lại transcript không ghi thêm file nào; tmp bị
- * dọn thì lần parse sau ghi lại. Ghi lỗi thì lùi về data: URI như cũ.
+ * Written to a file instead of kept as a data: URI. A data URI travels whole inside `sessionSelected` — a single SSE/
+ * postMessage packet resent EVERY time a tab opens or reconnects: a playtest transcript measured 8–10 MB of
+ * base64 in its 16 MB tail, and the phone downloaded and decoded all of it before drawing the first line. With a `path` the host
+ * turns it into a URL (`asWebviewUri` / `/api/file`), `<img loading=lazy>` only loads visible images and
+ * the browser can cache them. Name = sha1 of the content ⇒ re-reading the transcript writes no new files; if tmp is
+ * cleaned, the next parse writes them again. On a write error fall back to a data: URI as before.
  */
 const MAX_IMAGE_B64=12*1024*1024;
 const IMAGE_EXT:Record<string,string>={'image/png':'.png','image/jpeg':'.jpg','image/gif':'.gif','image/webp':'.webp'};
-/** Phải nằm dưới `localMediaRoots()` (tmp) để cả panel lẫn `/api/file` chịu phục vụ. */
+/** Must sit under `localMediaRoots()` (tmp) so both the panel and `/api/file` agree to serve it. */
 export function toolImageDir(){return nodePath.join(os.tmpdir(),'devhub-tool-images');}
 function spillImage(dir:string|null,mime:string,data:string):string|undefined{
   if(!dir)return undefined;
@@ -46,7 +46,7 @@ function spillImage(dir:string|null,mime:string,data:string):string|undefined{
     const file=nodePath.join(dir,crypto.createHash('sha1').update(data).digest('hex')+IMAGE_EXT[mime]);
     if(!fsSync.existsSync(file)){
       fsSync.mkdirSync(dir,{recursive:true});
-      // Ghi tạm rồi rename: hai tab parse cùng transcript không để lộ file ghi dở cho <img>.
+      // Write to a temp name then rename: two tabs parsing the same transcript never expose a half-written file to <img>.
       const tmp=`${file}.${process.pid}.${Date.now()}.tmp`;
       fsSync.writeFileSync(tmp,Buffer.from(data,'base64'));fsSync.renameSync(tmp,file);
     }
@@ -61,7 +61,7 @@ function resultImages(content:any,dir:string|null):{src?:string;path?:string}[]{
     return [path?{path}:{src:`data:${mime};base64,${src.data}`}];});
 }
 function isShellTool(name:string){const n=name.toLowerCase();return n==='bash'||n.includes('shell');}
-/** tool_result của Bash mở đầu bằng "Exit code N" khi lệnh fail; `is_error` chỉ nói có/không. */
+/** A Bash tool_result starts with "Exit code N" when the command fails; `is_error` is only yes/no. */
 function exitCodeFrom(text:string|undefined):number{const m=/^Exit code (\d+)/m.exec(text||'');return m?Number(m[1]):1;}
 function fileChangeForTool(name:string):'add'|'modify'|'delete'|undefined {
   const n=name.toLowerCase();
@@ -70,8 +70,8 @@ function fileChangeForTool(name:string):'add'|'modify'|'delete'|undefined {
   if(n.includes('delete') || n.includes('remove')) return 'delete';
 }
 /**
- * Dòng tiến trình của một sub-agent chạy nền. Con chạy hàng phút mà `tool_result` của nó đã
- * trả về ngay từ giây đầu, nên đây là thứ DUY NHẤT nhúc nhích trên dòng `Agent` trong lúc chờ.
+ * Progress line of a background sub-agent. The child runs for minutes while its `tool_result`
+ * came back in the first second, so this is the ONLY thing that moves on the `Agent` row while waiting.
  */
 export function taskProgressSummary(raw:any):string|undefined{
   const u=raw?.usage||{};const bits:string[]=[];
@@ -84,27 +84,27 @@ export function taskProgressSummary(raw:any):string|undefined{
 interface PendingTool {name:string;label:string;command?:string;filePath?:string;change?:'add'|'modify'|'delete';}
 
 export class ClaudeEventParser {
-  /** `null` = giữ data: URI (test không đụng đĩa). Không dùng `undefined`: nó kích hoạt lại giá trị mặc định. */
+  /** `null` = keep data: URIs (tests don't touch disk). Not `undefined`: that re-triggers the default value. */
   constructor(private imageDir:string|null=toolImageDir()){}
   private pending=new Map<string,PendingTool>();
   private sawTextDelta=false;
-  /** Tool đã dựng dòng từ `content_block_start`; `assistant` sau đó chỉ bổ sung tham số. */
+  /** Tools whose row was built at `content_block_start`; the later `assistant` only fills in arguments. */
   private announced=new Set<string>();
   /**
-   * `tool_use_id` của các lượt gọi đã bị đẩy xuống nền (sub-agent). `tool_result` của chúng về
-   * NGAY với một mẩu metadata nội bộ ("Async agent launched successfully…") chứ không phải kết
-   * quả — đóng dòng bằng nó là khoe "xong" trong khi con mới bắt đầu chạy. Kết quả thật tới sau
-   * ở `task_notification`.
+   * `tool_use_id`s of calls pushed to the background (sub-agents). Their `tool_result` comes back
+   * IMMEDIATELY with a scrap of internal metadata ("Async agent launched successfully…") rather than the
+   * result — closing the row with it would claim "done" while the child has only just started. The real result arrives later
+   * in `task_notification`.
    */
   private backgrounded=new Set<string>();
-  /** Message id đã neo mốc cache: `assistant` lặp lại mỗi content block của cùng một message. */
+  /** Message ids already used to anchor the cache time: `assistant` repeats for every content block of the same message. */
   private cacheMsg:string|undefined;
 
   /**
-   * Mốc prompt cache, theo đúng cách extension chính thức tính: request chạm cache (đọc hoặc
-   * ghi) làm mới TTL, nên đồng hồ tính từ lúc request đó bắt đầu — `message_start` là tín hiệu
-   * sớm nhất ta thấy. TTL đọc từ `cache_creation.ephemeral_1h/5m`; lượt chỉ đọc cache không nói
-   * TTL nên để trống, merge giữ giá trị cũ.
+   * Prompt cache anchor, computed the way the official extension does: a request that hits the cache (read or
+   * write) refreshes the TTL, so the clock runs from when that request started — `message_start` is the earliest
+   * signal we see. TTL comes from `cache_creation.ephemeral_1h/5m`; a turn that only reads the cache doesn't state
+   * the TTL, so leave it empty and the merge keeps the old value.
    */
   private cacheMark(id:any,u:any,t:number,out:DevHubEvent[]){
     if(!u||typeof u!=='object')return;
@@ -114,7 +114,7 @@ export class ClaudeEventParser {
     this.cacheMsg=key;
     const cc=u.cache_creation||{};
     const ttl=(Number(cc.ephemeral_1h_input_tokens)||0)>0?3600000:(Number(cc.ephemeral_5m_input_tokens)||0)>0?300000:undefined;
-    // Không gửi key `undefined`: webview gộp bằng Object.assign, key rỗng sẽ xoá TTL đã biết.
+    // Don't send `undefined` keys: the webview merges with Object.assign, and an empty key would erase a known TTL.
     const usage:any={cacheAnchorAt:t,cacheTokens:(Number(u.input_tokens)||0)+read+write};if(ttl)usage.cacheTtlMs=ttl;
     out.push({type:'usage',usage,timestamp:t});
   }
@@ -122,22 +122,22 @@ export class ClaudeEventParser {
   parse(raw:any):DevHubEvent[]{
     const out:DevHubEvent[]=[]; const t=now(); if(!raw||typeof raw!=='object') return out;
     /**
-     * Sub-agent nền: CLI đổ CẢ stream của con ra cùng stdout, chỉ đánh dấu bằng
-     * `parent_tool_use_id`. Trộn thẳng vào dòng chính là hai lỗi một lúc — lời của con đọc ra
-     * như lời của cha, và mỗi dòng tool của con CẮT ĐÔI bong bóng cha đang stream giữa chừng
-     * (delta chỉ nối tiếp được khi bong bóng còn là phần tử cuối). Tiến trình của con đi qua
-     * `task_*` bên dưới, gói trong ĐÚNG dòng `Agent` đã sinh ra nó.
+     * Background sub-agent: the CLI pours the child's ENTIRE stream onto the same stdout, marked only by
+     * `parent_tool_use_id`. Mixing it straight into the main stream causes two bugs at once — the child's words read
+     * as the parent's, and every tool row of the child SPLITS the parent bubble mid-stream
+     * (deltas can only append while the bubble is still the last element). The child's progress goes through
+     * `task_*` below, wrapped inside the SAME `Agent` row that spawned it.
      */
     if(raw.parent_tool_use_id) return out;
     /**
-     * Lượt CLI tự chèn ("Continue from where you left off." lúc nối lại lượt bị cắt) được trả
-     * lời bằng một hàng `<synthetic>` "No response requested.". 0.29.52 đã loại nửa user, nửa
-     * assistant còn lại vẫn vẽ ra như lời agent — mở lại tab thì đọc y như câu vừa gửi bị chặn.
-     * Lỗi THẬT cũng là `<synthetic>` (rate limit, 402, 529, mất mạng) nhưng luôn mang
-     * `isApiErrorMessage`, và những cái đó PHẢI hiện. Khảo sát toàn bộ `~/.claude/projects`:
-     * 135 hàng synthetic, 116 hàng không có cờ đó đều đúng một câu này, không ngoại lệ.
-     * Phải khớp đúng câu: output lệnh local (`/context`, `/usage`…) trên stream-json cũng là
-     * `<synthetic>` không cờ lỗi — khảo sát transcript không thấy vì file không ghi hàng đó.
+     * Turns the CLI inserts itself ("Continue from where you left off." when resuming a cut turn) are answered
+     * with a `<synthetic>` "No response requested." row. 0.29.52 removed the user half; the remaining
+     * assistant half was still drawn as the agent speaking — reopening the tab read like the message just sent had been blocked.
+     * REAL errors are also `<synthetic>` (rate limit, 402, 529, network loss) but always carry
+     * `isApiErrorMessage`, and those MUST show. Surveying all of `~/.claude/projects`:
+     * 135 synthetic rows, the 116 without that flag were all exactly this sentence, no exceptions.
+     * Must match the exact sentence: output of local commands (`/context`, `/usage`…) on stream-json is also
+     * `<synthetic>` without the error flag — the transcript survey didn't see it because files don't record those rows.
      */
     if(raw.type==='assistant'&&raw.message?.model==='<synthetic>'&&!raw.isApiErrorMessage&&isNoResponseGhost(raw.message?.content)) return out;
     if(raw.type==='assistant'){
@@ -145,10 +145,10 @@ export class ClaudeEventParser {
       const c=raw.message?.content;
       if(Array.isArray(c)) for(const part of c){
         /**
-         * Từ Opus 5.5 (như Fable 5.1), câu báo tiến độ giữa các tool call — đúng câu mà
-         * `appendSystemPrompt` xin — về dưới dạng `thinking` CÓ chữ, không phải `text`. Bỏ qua
-         * như cũ thì lượt lại câm giữa các dòng tool. Suy luận thật vẫn bị API bịt (chuỗi rỗng),
-         * nên có chữ = câu viết cho người đọc. Luôn đứng riêng một hàng `assistant`, không delta.
+         * Since Opus 5.5 (like Fable 5.1), the progress sentence between tool calls — the very sentence
+         * `appendSystemPrompt` asks for — arrives as `thinking` WITH text, not as `text`. Skipping it
+         * as before leaves the turn silent between tool rows. Real reasoning is still redacted by the API (empty string),
+         * so text present = a sentence written for the reader. It always stands alone in its own `assistant` row, no delta.
          */
         if(part?.type==='thinking'&&typeof part.thinking==='string'&&part.thinking.trim()){
           out.push({type:'assistant_message',text:part.thinking.trim(),timestamp:t});
@@ -169,9 +169,9 @@ export class ClaudeEventParser {
       const event=raw.event||{}; const delta=event.delta;
       if(event.type==='message_start')this.cacheMark(event.message?.id,event.message?.usage,t,out);
       if(delta?.type==='text_delta'&&delta.text){ this.sawTextDelta=true; out.push({type:'assistant_delta',text:String(delta.text),timestamp:t}); }
-      // Tham số tool stream ra từng token, nên `assistant` tới SAU khi model viết xong lệnh
-      // (đo được 1,2s với lệnh ngắn, lâu hơn với heredoc). Dựng dòng ngay ở block_start;
-      // `assistant` phát lại cùng callId để điền tham số vào đúng dòng đó.
+      // Tool arguments stream token by token, so `assistant` arrives AFTER the model finishes writing the command
+      // (measured 1.2s for a short command, longer for a heredoc). Build the row right at block_start;
+      // `assistant` re-emits the same callId to fill the arguments into that row.
       const cb=event.type==='content_block_start'?event.content_block:undefined;
       if(cb?.type==='tool_use'&&cb.id&&!this.announced.has(String(cb.id))){
         const id=String(cb.id); const name=String(cb.name||'tool'); this.announced.add(id);
@@ -183,7 +183,7 @@ export class ClaudeEventParser {
       if(Array.isArray(content)) for(const part of content){
         if(part?.type!=='tool_result') continue;
         const id=String(part.tool_use_id||part.id||'');
-        if(id&&this.backgrounded.has(id))continue;   // giữ pending lại cho `task_notification`
+        if(id&&this.backgrounded.has(id))continue;   // keep it pending for `task_notification`
         const pending=id?this.pending.get(id):undefined; const summary=resultText(part.content); const isError=part.is_error===true;
         if(pending?.command){
           out.push({type:'command_completed',command:pending.command,output:summary,exitCode:isError?exitCodeFrom(summary):undefined,callId:id||undefined,timestamp:t});
@@ -197,24 +197,24 @@ export class ClaudeEventParser {
     } else if(raw.type==='system'&&raw.subtype==='init'){
       if(typeof raw.model==='string'&&raw.model)out.push({type:'usage',usage:{model:raw.model},timestamp:t});
     } else if(raw.type==='system'&&raw.subtype==='thinking_tokens'){
-      // Nội dung thinking của Opus bị bịt (chuỗi rỗng + signature), số token ước lượng là
-      // tín hiệu sống DUY NHẤT trong lúc model nghĩ. Giá trị là tuyệt đối, không cộng dồn.
+      // Opus thinking content is redacted (empty string + signature); the estimated token count is
+      // the ONLY sign of life while the model thinks. The value is absolute, not cumulative.
       const n=Number(raw.estimated_tokens);
       if(Number.isFinite(n)&&n>0) out.push({type:'thinking',tokens:n,timestamp:t});
     } else if(raw.type==='system'&&raw.subtype==='status'){
-      // `/compact` chỉ báo qua đây; bỏ qua thì người dùng bấm xong không thấy gì.
+      // `/compact` only reports through here; ignoring it leaves the user seeing nothing after clicking.
       if(raw.status==='compacting')out.push({type:'tool_started',tool:'Compact',label:'compacting the conversation\u2026',timestamp:t} as DevHubEvent);
       else if(raw.compact_result==='failed')out.push({type:'error',message:`Compact failed: ${String(raw.compact_error||'unknown reason')}`,timestamp:t});
       else if(raw.compact_result){out.push({type:'tool_completed',tool:'Compact',label:String(raw.compact_result),
         summary:raw.pre_tokens&&raw.post_tokens?`${raw.pre_tokens} \u2192 ${raw.post_tokens} tokens`:undefined,timestamp:t} as DevHubEvent);
-        // Prefix đã đổi hẳn: cache cũ không còn khớp dù chưa hết giờ, lượt kế ghi lại từ đầu.
+        // The prefix changed outright: the old cache no longer matches even before it expires; the next turn rewrites from scratch.
         if(raw.compact_result==='success'){this.cacheMsg=undefined;out.push({type:'usage',usage:{cacheAnchorAt:0},timestamp:t});}}
     } else if(raw.type==='system'&&(raw.subtype==='task_started'||raw.subtype==='task_progress'||raw.subtype==='task_notification')){
-      // Lượt gọi nền là đường DUY NHẤT có output: `tool_result` của nó chỉ là biên nhận.
+      // A background call is the ONLY path with output: its `tool_result` is just a receipt.
       const id=String(raw.tool_use_id||'');
-      // Chỉ nhận task của CHÍNH tiến trình này. Một `task_notification` còn sót từ phiên trước
-      // (CLI báo lại lúc resume) không có dòng nào để bám: dựng dòng mới cho nó là chèn ngang
-      // vào giữa đoạn đang stream — đúng cái bệnh vừa chữa — mà nhãn cũng chỉ đoán được ra 'Agent'.
+      // Only accept tasks of THIS process. A `task_notification` left over from a previous session
+      // (the CLI re-reports it on resume) has no row to attach to: building a new row for it cuts
+      // into the middle of the streaming text — the very bug just fixed — and the label could only be guessed as 'Agent'.
       if(!id||!(this.pending.has(id)||this.backgrounded.has(id)))return out;
       const pending=this.pending.get(id);
       const tool=pending?.name||(raw.task_type==='local_agent'?'Agent':'Task');
@@ -254,23 +254,23 @@ function isNoResponseGhost(c:any):boolean{
 }
 
 /**
- * `result` không có context_used/window. `modelUsage` thì có `contextWindow` mỗi model —
- * lấy model có cửa sổ lớn nhất (model chính, không phải haiku phụ trợ) và cộng phần prompt
- * đã gửi để ước lượng mức dùng. Là XẤP XỈ, không phải số CLI công bố.
+ * `result` has no context_used/window. `modelUsage` has a `contextWindow` per model —
+ * take the model with the largest window (the main model, not the helper haiku) and add the prompt
+ * sent to estimate usage. It is an APPROXIMATION, not a number the CLI publishes.
  */
 export function deriveContext(raw:any):{used?:number;window?:number}{
   const mu=raw?.modelUsage; if(!mu||typeof mu!=='object')return {};
   let best:any,window=0;
   for(const m of Object.values<any>(mu)){const w=Number(m?.contextWindow)||0;if(w>window){window=w;best=m;}}
   if(!best||!window)return {};
-  // Một lượt có thể gọi API nhiều vòng; CỘNG DỒN các vòng sẽ vượt cửa sổ (thấy 283%).
-  // Context thực là prompt của vòng CUỐI, nên ưu tiên `usage.iterations`.
+  // One turn can call the API several rounds; SUMMING the rounds overshoots the window (283% was seen).
+  // The real context is the LAST round's prompt, so prefer `usage.iterations`.
   const it=raw?.usage?.iterations;
   const last=Array.isArray(it)&&it.length?it[it.length-1]:undefined;
   const src=last?{i:last.input_tokens,r:last.cache_read_input_tokens,c:last.cache_creation_input_tokens}
                 :{i:best.inputTokens,r:best.cacheReadInputTokens,c:best.cacheCreationInputTokens};
   let used=(Number(src.i)||0)+(Number(src.r)||0)+(Number(src.c)||0);
-  if(used>window)used=window;   // chặn trần: hiển thị >100% là vô nghĩa
+  if(used>window)used=window;   // clamp: showing >100% is meaningless
   return {used:used||undefined,window};
 }
 

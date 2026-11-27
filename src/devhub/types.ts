@@ -6,15 +6,15 @@ export interface DevHubProject { id:string; workspaceId:string; name:string; roo
 export interface UsageSnapshot {
   inputTokens?:number; outputTokens?:number; cachedInputTokens?:number; cacheWriteInputTokens?:number; reasoningOutputTokens?:number; contextUsedTokens?:number; contextWindowTokens?:number;
   quota5hUsedPercentage?:number; quota5hResetsAt?:number; quota5hObservedAt?:number; quota5hAuthoritative?:boolean; quota7dUsedPercentage?:number; quota7dResetsAt?:number; quota7dObservedAt?:number; quota7dAuthoritative?:boolean; costUsd?:number;
-  /** Id CLI thật sự chạy (`opus` → `claude-opus-5-5`); alias trong setting không nói lên bản nào. */
+  /** The CLI id actually running (`opus` → `claude-opus-5-5`); the alias in settings doesn't say which build. */
   model?:string;
   /**
-   * Prompt cache của hội thoại chính: lúc request cuối chạm cache (đọc hoặc ghi) và TTL của nó.
-   * `cacheAnchorAt:0` = vừa compact, cache cũ không còn khớp. `cacheTokens` = phần lượt kế phải
-   * ghi lại nếu cache đã nguội. Sub-agent có cache riêng nên không tính.
+   * Prompt cache of the main conversation: when the last request hit the cache (read or write) and its TTL.
+   * `cacheAnchorAt:0` = just compacted, the old cache no longer matches. `cacheTokens` = what the next turn has to
+   * rewrite if the cache went cold. Sub-agents have their own cache, so they don't count.
    */
   cacheAnchorAt?:number; cacheTtlMs?:number; cacheTokens?:number;
-  /** `get_usage` của CLI: đặc điểm usage 24h/7d của cả tài khoản trên máy này (không phải session). */
+  /** The CLI's `get_usage`: 24h/7d usage traits of the whole account on this machine (not per session). */
   usageInsights?:UsageInsights;
 }
 export interface UsageInsightWindow { requests?:number; sessions?:number; behaviors:{key:string;pct:number}[]; top:{group:string;name:string;pct:number}[]; }
@@ -22,34 +22,34 @@ export interface UsageInsights { observedAt:number; day?:UsageInsightWindow; wee
 export interface DevHubSession {
   provider:ProviderId; nativeSessionId:string; workspaceId:string; projectId:string; cwd:string; title:string; status:SessionStatus;
   createdAt:number; updatedAt:number; usage?:UsageSnapshot;
-  /** Model/effort đã chọn cho session này; đóng tab mở lại phải dùng lại, không rơi về setting mặc định. */
+  /** Model/effort chosen for this session; closing and reopening the tab must reuse them, not fall back to the settings default. */
   model?:string; effort?:string;
-  /** Tên người đặt tay (rename trên cây); `title` vẫn là prompt đầu, không bị đè. */
+  /** A name set by hand (rename in the tree); `title` stays the first prompt and isn't overwritten. */
   name?:string;
-  /** Endpoint planner; ID nội bộ được scope theo daemon, HTTP dùng conversation gốc. */
+  /** Planner endpoint; the internal ID is scoped per daemon, HTTP uses the original conversation. */
   plannerEndpoint?:string;
 }
 export type DevHubEvent =
-  // `images` = đường dẫn file đính kèm (host đổi sang webview URI lúc gửi, như assistant_image).
+  // `images` = paths of attached files (the host turns them into webview URIs when sending, like assistant_image).
   | { type:'user_message'; text:string; images?:string[]; timestamp:number }
   | { type:'assistant_delta'; text:string; timestamp:number }
   | { type:'assistant_message'; text:string; timestamp:number }
   /**
-   * THAY THẾ, không nối: `text` là TOÀN BỘ phần trả lời tới lúc này. Planner phát kiểu này
-   * vì daemon của nó sửa một message tại chỗ (Slack-style) chứ không gửi delta — nối hai
-   * frame như `assistant_delta` sẽ ra chuỗi rác. Ai stream bằng delta thì đừng dùng cái này.
+   * REPLACE, not append: `text` is the ENTIRE answer so far. The planner emits this
+   * because its daemon edits one message in place (Slack-style) rather than sending deltas — appending two
+   * frames like `assistant_delta` gives a garbage string. Anything that streams deltas must not use this.
    */
   | { type:'assistant_view'; text:string; timestamp:number }
-  // `path` = file trên đĩa (host đổi sang webview URI lúc gửi); `src` = data: URI, đường lùi.
+  // `path` = a file on disk (the host turns it into a webview URI when sending); `src` = a data: URI, the fallback.
   | { type:'assistant_image'; src?:string; path?:string; alt:string; timestamp:number }
-  // callId: khớp *_started với *_completed để UI cập nhật đúng dòng đó, khỏi in hai lần.
-  // `summary` chỉ có ở dòng đang chạy dài (tiến trình sub-agent nền); dòng tool thường không mang.
+  // callId: matches *_started with *_completed so the UI updates that exact row instead of printing it twice.
+  // `summary` only exists on long-running rows (background sub-agent progress); normal tool rows don't carry it.
   | { type:'tool_started'; tool:string; label:string; summary?:string; callId?:string; timestamp:number }
   | { type:'tool_completed'; tool:string; label:string; summary?:string; callId?:string; timestamp:number }
   | { type:'command_started'; command:string; callId?:string; timestamp:number }
   | { type:'command_completed'; command:string; exitCode?:number; output?:string; callId?:string; timestamp:number }
   | { type:'file_changed'; path:string; change:'add'|'modify'|'delete'; timestamp:number }
-  // Chỉ báo tiến trình lúc model đang nghĩ; KHÔNG lưu vào transcript, chỉ vẽ ở chỉ báo chạy.
+  // Only a progress signal while the model thinks; NOT saved to the transcript, only drawn on the running indicator.
   | { type:'thinking'; tokens:number; timestamp:number }
   | { type:'usage'; usage:UsageSnapshot; timestamp:number }
   | { type:'warning'; message:string; timestamp:number }

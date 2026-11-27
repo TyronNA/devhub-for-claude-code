@@ -2,9 +2,9 @@ const https=require('node:https');
 import { ProcessRunner } from './processRunner';
 
 /**
- * So version CLI đang cài với bản mới nhất trên npm. Đây là chỗ DUY NHẤT extension
- * đi ra Internet ngoài planner/mobile (đều loopback/LAN), nên nó phải im lặng khi hỏng:
- * mọi lỗi mạng, timeout hay output lạ đều trả undefined chứ không nổi lên UI.
+ * Compares the installed CLI version with the latest on npm. This is the ONLY place the extension
+ * goes out to the Internet besides planner/mobile (both loopback/LAN), so it must stay silent on failure:
+ * every network error, timeout or odd output returns undefined instead of surfacing in the UI.
  */
 export const CLI_PACKAGES:{[provider:string]:string}={claude:'@anthropic-ai/claude-code'};
 export const CHECK_INTERVAL_MS=6*60*60*1000;
@@ -13,13 +13,13 @@ export interface VersionDrift { provider:string; installed:string; latest:string
 export interface VersionCacheEntry { at:number; latest?:string }
 
 /** `claude --version` → "2.1.266 (Claude Code)",
- *  và cả dạng `v1.2.3` — tiền tố `v` dính liền số nên phải cho phép riêng. */
+ *  and also the `v1.2.3` form — the `v` prefix is glued to the number so it is allowed separately. */
 export function parseCliVersion(text:string):string|undefined{
   const m=/(?:^|[^\w.])v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?![\w.])/.exec(String(text||''));
   return m?m[1]:undefined;
 }
 
-/** So theo số, prerelease coi như thấp hơn bản release cùng số (2.1.0-rc < 2.1.0). */
+/** Compared numerically; a prerelease counts as lower than the release with the same number (2.1.0-rc < 2.1.0). */
 export function compareVersions(a:string,b:string):number{
   const split=(v:string)=>{const [core,pre]=String(v).split(/[-+]/,2);return {nums:core.split('.').map(x=>parseInt(x,10)||0),pre:pre||''};};
   const x=split(a),y=split(b);
@@ -36,7 +36,7 @@ export async function fetchLatestVersion(pkg:string,timeoutMs=3000):Promise<stri
     let settled=false;const done=(v?:string)=>{if(!settled){settled=true;resolve(v);}};
     try{
       const req=https.get(`https://registry.npmjs.org/${pkg.replace('/','%2F')}/latest`,
-        // Bản rút gọn của registry: cùng field `version` nhưng nhỏ hơn packument đầy đủ nhiều lần.
+        // The registry's abbreviated document: the same `version` field but many times smaller than the full packument.
         {headers:{accept:'application/vnd.npm.install-v1+json, application/json'},timeout:timeoutMs},(res:any)=>{
         if(res.statusCode!==200){res.resume();return done();}
         let body='';res.setEncoding('utf8');
@@ -49,7 +49,7 @@ export async function fetchLatestVersion(pkg:string,timeoutMs=3000):Promise<stri
   });
 }
 
-/** Đọc version thật của binary. Không dùng lại isAvailable vì cái đó chỉ trả boolean. */
+/** Reads the binary's real version. isAvailable isn't reused because it only returns a boolean. */
 export async function readInstalledVersion(runner:ProcessRunner,command:string,timeoutMs=2500):Promise<string|undefined>{
   try{
     const h=runner.spawnLines({command,args:['--version'],cwd:process.cwd()});
@@ -71,8 +71,8 @@ export interface DriftCheckDeps {
 }
 
 /**
- * Trả về mọi CLI đang tụt version. Cache theo provider để một cửa sổ mở cả ngày
- * không gõ registry mỗi lần refresh — version của binary thì đọc lại mỗi lần vì rẻ.
+ * Returns every CLI that is behind. Cached per provider so a window open all day
+ * doesn't hit the registry on every refresh — the binary's version is re-read each time because that's cheap.
  */
 export async function checkVersionDrift(deps:DriftCheckDeps):Promise<VersionDrift[]>{
   const now=deps.now?deps.now():Date.now();const fetchLatest=deps.fetchLatest||((p:string)=>fetchLatestVersion(p));

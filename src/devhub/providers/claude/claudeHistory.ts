@@ -9,11 +9,11 @@ function userText(raw:any):string|undefined { const c=raw?.message?.content; if(
 export interface ClaudeFileFacts { cwd?:string; id?:string; title?:string; created:number; mtimeMs:number; }
 export async function discoverClaudeHistory(projects:DevHubProject[], claudeRoot?:string, maxFiles=1500, transcriptIndex?:Map<string,string>, cache?:HistoryScanCache<ClaudeFileFacts>):Promise<DevHubSession[]> {
   const root=claudeRoot ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(),'.claude');
-  // `maxFiles` cắt theo thứ tự TÊN, mà tên transcript Claude là UUID — nên khi số file vượt trần,
-  // tập bị bỏ là ngẫu nhiên, không phải "cũ nhất". Trần là `devHub.history.maxFilesPerProvider`;
-  // đo trên 1.954 file thì cap 1.500 chưa bỏ session nào của project đã đăng ký, và quét hết chỉ
-  // ~500 ms so với ~440 ms. Chọn lại theo mtime thì TỆ HƠN: 1.500 file mới nhất trên toàn ~/.claude
-  // bị lấp bởi project chưa đăng ký, đo được 168 session thay vì 189.
+  // `maxFiles` cuts in NAME order, and Claude transcript names are UUIDs — so when the file count exceeds the cap,
+  // the dropped set is random, not "the oldest". The cap is `devHub.history.maxFilesPerProvider`;
+  // measured over 1,954 files, a 1,500 cap dropped no session of a registered project, and the full scan took only
+  // ~500 ms vs ~440 ms. Picking by mtime instead is WORSE: the 1,500 newest files across all of ~/.claude
+  // get filled by unregistered projects, giving 168 sessions instead of 189.
   const found=await mapLimit(await collectFiles(path.join(root,'projects'),n=>n.endsWith('.jsonl'),maxFiles,3),8,async file=>{
     if(file.includes(`${path.sep}subagents${path.sep}`)) return undefined;
     const stamp=await stampOf(file); if(!stamp) return undefined;
@@ -35,14 +35,14 @@ export async function discoverClaudeHistory(projects:DevHubProject[], claudeRoot
   });
   return found.filter((s):s is DevHubSession=>!!s);
 }
-// Chat dài vượt 16 MiB thì đọc từ ĐẦU là mất đúng phần hội thoại mới nhất — UI cũng chỉ
-// lấy 1.500 event cuối, nên đọc từ cuối file.
+// For chats over 16 MiB, reading from the START loses exactly the newest part of the conversation — the UI also only
+// takes the last 1,500 events, so read from the end of the file.
 /**
- * KHÔNG phải mọi hàng `type:"user"` đều là lời người dùng gõ. CLI tự chèn lượt user để nói với
- * model: `<task-notification>…` khi một task nền kết thúc (`origin.kind`), và "Continue from where
- * you left off." khi nối lại lượt bị cắt (`isMeta`). Vẽ chúng thành bong bóng user là bịa ra câu
- * người dùng chưa từng nói — đúng thứ trông như "render ảo" lúc mở lại tab.
- * Hàng CŨ không có `origin` nào cả, nên chỉ loại khi kind có mặt VÀ khác `human`.
+ * NOT every `type:"user"` row is something the user typed. The CLI inserts user turns to talk to
+ * the model: `<task-notification>…` when a background task finishes (`origin.kind`), and "Continue from where
+ * you left off." when resuming a cut turn (`isMeta`). Drawing them as user bubbles invents words
+ * the user never said — exactly what looks like "phantom rendering" when reopening a tab.
+ * OLD rows have no `origin` at all, so only drop when kind is present AND not `human`.
  */
 export function isInjectedUserTurn(raw:any):boolean{
   if(raw?.isMeta===true||raw?.isSidechain===true||raw?.parent_tool_use_id)return true;
@@ -50,6 +50,6 @@ export function isInjectedUserTurn(raw:any):boolean{
   return typeof kind==='string'&&kind!=='human';
 }
 export async function loadClaudeTranscript(file:string):Promise<DevHubEvent[]> { const rows=await readJsonLines(file,16*1024*1024,'end');const out:DevHubEvent[]=[]; const parser=new ClaudeEventParser(); for(const r of rows){ if(r?.type==='user'&&!isInjectedUserTurn(r)){const tx=userText(r); if(tx) out.push({type:'user_message',text:tx,timestamp:timestampOf(r,Date.now())});} out.push(...parser.parse(r)); } return out; }
-export async function findClaudeTranscript(nativeSessionId:string, claudeRoot?:string,maxFiles=2000):Promise<string|undefined>{ const root=claudeRoot ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(),'.claude'); /* Chỉ nhận ĐÚNG tên cần tìm: nhận mọi `.jsonl` rồi `find` nghĩa là cap cắt trước khi tìm,
-   và file cần tìm có thể nằm ngoài phần bị cắt — với 1.954 transcript thì đó là chuyện thường. */
+export async function findClaudeTranscript(nativeSessionId:string, claudeRoot?:string,maxFiles=2000):Promise<string|undefined>{ const root=claudeRoot ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(),'.claude'); /* Accept ONLY the exact name being looked for: accepting every `.jsonl` then calling `find` means the cap cuts before searching,
+   and the wanted file may be in the part that was cut — with 1,954 transcripts that is common. */
 const files=await collectFiles(path.join(root,'projects'),n=>n===`${nativeSessionId}.jsonl`,maxFiles,3); return files[0]; }

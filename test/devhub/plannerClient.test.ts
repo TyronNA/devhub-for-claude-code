@@ -2,7 +2,7 @@ export {};
 const test=require('node:test');const assert=require('node:assert/strict');const http=require('node:http');
 import { parsePayload, PlannerClient } from '../../src/devhub/providers/planner/plannerClient';
 
-/** Daemon giả: chỉ nói đúng những gì API thật nói, kể cả 409 kèm `reason` ở status line. */
+/** A fake daemon: says only what the real API says, including a 409 with `reason` in the status line. */
 function daemon(handler:(req:any,body:string,res:any)=>void){
   const seen:any[]=[];
   const server=http.createServer((req:any,res:any)=>{
@@ -42,7 +42,7 @@ test('approve sends the exact plan_version and never invents one',async()=>{
 });
 
 test('a 409 is a real answer and its reason reaches the message',async()=>{
-  // Approve sai version và preflight từ chối đều về 409; nuốt nó là nói dối người dùng.
+  // Approving the wrong version and a preflight refusal both come back as 409; swallowing it lies to the user.
   const d=await daemon((_req,_b,res)=>{res.writeHead(409,'stale plan');res.end('');});
   try{
     await assert.rejects(()=>d.client.approve('A-1',1),/409/);
@@ -56,7 +56,7 @@ test('event payloads are decoded even though the API leaves them as text',async(
   try{
     const rows=await d.client.events('A-1');
     assert.equal(rows[0].payload.to,'ANALYZING');
-    assert.equal(rows[1].payload,undefined,'payload hỏng phải là undefined, không được ném');
+    assert.equal(rows[1].payload,undefined,'a broken payload must be undefined, not throw');
   }finally{await d.close();}
 });
 

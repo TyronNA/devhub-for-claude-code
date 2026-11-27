@@ -24,8 +24,8 @@ export class UsageAggregator {
       const g=groups.get(s.provider) ?? {provider:s.provider,inputTokens:0,outputTokens:0,cachedInputTokens:0,cacheWriteInputTokens:0,reasoningOutputTokens:0,costUsd:0}; const u=s.usage||{};
       g.inputTokens+=u.inputTokens||0; g.outputTokens+=u.outputTokens||0; g.cachedInputTokens+=u.cachedInputTokens||0; g.cacheWriteInputTokens+=u.cacheWriteInputTokens||0; g.reasoningOutputTokens+=u.reasoningOutputTokens||0; g.costUsd+=u.costUsd||0;
       if(u.contextUsedTokens!==undefined)g.contextUsedTokens=u.contextUsedTokens;if(u.contextWindowTokens!==undefined)g.contextWindowTokens=u.contextWindowTokens;
-      // Xếp theo LÚC ĐO, không theo updatedAt: mở lại một session cũ ghi lại quota cũ của nó
-      // kèm updatedAt=now, và lấy updatedAt làm mốc thì ảnh 3 tuần trước đè ảnh mới đo.
+      // Ordered by WHEN MEASURED, not by updatedAt: reopening an old session rewrites its old quota
+      // with updatedAt=now, and using updatedAt as the key lets a 3-week-old snapshot override a fresh one.
       const observed=Math.max(u.quota5hObservedAt||0,u.quota7dObservedAt||0);const q=latestQuota.get(s.provider);if(observed&&(!q||observed>q.at))latestQuota.set(s.provider,{at:observed,u});
       groups.set(s.provider,g);
     }

@@ -4,13 +4,13 @@ const nodeFs=require('node:fs');const nodeOs=require('node:os');const nodePathT=
 const {EventEmitter}=require('node:events');
 
 /**
- * Server mobile nói đúng protocol của `chat.js` qua SSE + POST. Test đi bằng HTTP thật:
- * sai một message là điện thoại đứng hình, mà unit test gọi thẳng phương thức thì không
- * thấy được chỗ đó.
+ * The mobile server speaks `chat.js`'s exact protocol over SSE + POST. Tests go over real HTTP:
+ * one wrong message freezes the phone, and a unit test calling methods directly can't
+ * see that.
  */
 const VSCODE={workspace:{getConfiguration:()=>({get:(_k:string,d:any)=>d})}};
 const PASSCODE='2468';
-/** Cửa duy nhất giờ là bàn số; cookie lấy từ đây thay cho `?t=` đã bỏ. */
+/** The only door is now the keypad; the cookie comes from here instead of the removed `?t=`. */
 async function login(base:string,code=PASSCODE){
   const r=await fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
   return {status:r.status,cookie:String(r.headers.get('set-cookie')||'').split(';')[0]};
@@ -57,14 +57,14 @@ async function withServer(fn:(ctx:any)=>Promise<void>,bindLan=true,customize?:(c
   const base=`http://127.0.0.1:${port}`;
   try{
     const signed=await login(base);
-    assert.equal(signed.status,204,'passcode đúng phải trả cookie');
+    assert.equal(signed.status,204,'the right passcode must return a cookie');
     const headers={cookie:signed.cookie};
     const page=await fetch(base+'/',{headers});
     await fn({srv,base,token,headers,em,calls,answered,session,storageDir,
       setTranscript:(rows:any[])=>{transcript=rows;},html:await page.text()});
   } finally { srv.dispose(); Module._load=original; }
 }
-/** Đọc SSE như trình duyệt và cho phép chờ đúng message mình cần. */
+/** Reads SSE like a browser and lets the test wait for exactly the message it needs. */
 async function stream(base:string,headers:any){
   const res:any=await fetch(base+'/api/stream',{headers});
   const reader=res.body.getReader();const dec=new TextDecoder();let buf='';const msgs:any[]=[];
@@ -83,16 +83,16 @@ async function stream(base:string,headers:any){
 
 test('the page is served only to a caller holding the token',async()=>{
   await withServer(async({base,html,srv,token})=>{
-    // Chưa đăng nhập thì trang gốc là bàn số, không phải chat: không có id nào của chat.js.
+    // Not signed in means the root page is the keypad, not the chat: none of chat.js's ids.
     const gate=await fetch(base+'/');
     assert.equal(gate.status,200);
     const gateHtml=await gate.text();
     assert.ok(!gateHtml.includes('id="messages"')&&!gateHtml.includes('id="input"'),gateHtml.slice(0,200));
-    // `?t=` đã bỏ hẳn: một token đúng nằm trong URL cũng không còn mở được gì.
+    // `?t=` is gone for good: even a correct token in the URL opens nothing any more.
     assert.equal((await fetch(base+'/api/sessions?t='+encodeURIComponent(token))).status,401);
-    // Cùng bộ id với panel — `chat.js` tra bằng getElementById.
+    // Same id set as the panel — `chat.js` looks them up with getElementById.
     assert.ok(html.includes('id="messages"')&&html.includes('id="input"'));
-    // bridge phải đứng trước chat.js: chat.js gọi acquireVsCodeApi() ngay dòng đầu.
+    // the bridge must come before chat.js: chat.js calls acquireVsCodeApi() on its first line.
     assert.ok(html.indexOf('/assets/bridge.js')<html.indexOf('/assets/chat.js'));
     assert.ok(srv.address().port>0);
   });
@@ -102,11 +102,11 @@ test('the page carries a CSP that only allows what it actually loads',async()=>{
   await withServer(async({base,headers})=>{
     const csp=(await fetch(base+'/',{headers})).headers.get('content-security-policy')||'';
     assert.match(csp,/default-src 'none'/);
-    // Tất cả asset/API của trang đều same-origin; `'unsafe-inline'` sẽ mở lại đúng cửa
-    // mà panel đã đóng, và `data:` chỉ được phép cho ảnh.
+    // Every asset/API of the page is same-origin; `'unsafe-inline'` would reopen exactly the door
+    // the panel closed, and `data:` is only allowed for images.
     assert.ok(!csp.includes("'unsafe-inline'"),csp);
     for(const d of ["script-src 'self'","style-src 'self'","connect-src 'self'","img-src 'self' data:"])
-      assert.ok(csp.includes(d),d+' thiếu trong '+csp);
+      assert.ok(csp.includes(d),d+' missing from '+csp);
   });
 });
 
@@ -116,12 +116,12 @@ test('with no passcode set the server refuses to serve at all',async()=>{
   try{
     const MobileServer=freshServer();
     const dir=nodeFs.mkdtempSync(nodePathT.join(nodeOs.tmpdir(),'devhub-nopass-'));
-    // Bỏ `?t=` mà cho passcode rỗng là đặt một cái shell không khoá lên Wi-Fi.
+    // Dropping `?t=` while allowing an empty passcode puts an unlocked shell on the Wi-Fi.
     for(const code of ['','12','abcd']){
       const srv=new MobileServer({manager:{on:()=>()=>{}} as any,providers:{},lookup:async()=>({workspaces:[],projects:[]}),
         listSessions:async()=>[],findSession:async()=>undefined,answerPermission:()=>{},storageDir:dir,passcode:()=>code});
-      await assert.rejects(()=>srv.start(0,true),/passcode/,'passcode "'+code+'" phải bị từ chối');
-      assert.equal(srv.address(),undefined,'từ chối rồi thì không được để port nào mở');
+      await assert.rejects(()=>srv.start(0,true),/passcode/,'passcode "'+code+'" must be rejected');
+      assert.equal(srv.address(),undefined,'once rejected no port may stay open');
       srv.dispose();
     }
   } finally { Module._load=original; }
@@ -130,18 +130,18 @@ test('with no passcode set the server refuses to serve at all',async()=>{
 test('the keypad gate hands out a cookie for the right code and nothing else',async()=>{
   await withServer(async({base,headers})=>{
     const gate=await (await fetch(base+'/')).text();
-    // Cố ý không có `<input>`: trong PWA iOS text field không focus được, nút thì bấm được.
-    assert.ok(!/<input/i.test(gate),'bàn số không được chứa input nào');
+    // Deliberately no `<input>`: in an iOS PWA a text field can't be focused, buttons can be tapped.
+    assert.ok(!/<input/i.test(gate),'the keypad must contain no input');
     assert.ok(/id="pad"/.test(gate)&&/api\/login/.test(gate),gate.slice(0,300));
-    // CSP riêng của trang này: inline có nonce, và KHÔNG có 'self' cho script vì /assets là sau cửa.
+    // This page's own CSP: inline with a nonce, and NO 'self' for scripts because /assets is behind the door.
     const csp=(await fetch(base+'/')).headers.get('content-security-policy')||'';
     assert.match(csp,/script-src 'nonce-/);
     assert.ok(!csp.includes("script-src 'self'"),csp);
-    // Nonce phải mới mỗi lần trả, không thì nó chỉ là 'unsafe-inline' viết dài hơn.
+    // The nonce must be fresh on every response, or it is just 'unsafe-inline' spelled longer.
     const one=(await (await fetch(base+'/')).text()).match(/nonce="([^"]+)"/)![1];
     const two=(await (await fetch(base+'/')).text()).match(/nonce="([^"]+)"/)![1];
     assert.notEqual(one,two);
-    // Code sai không trả cookie; code đúng thì trả, và cookie đó mở được API.
+    // A wrong code returns no cookie; the right one does, and that cookie opens the API.
     const bad=await fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:'1111'})});
     assert.equal(bad.status,401);assert.equal(bad.headers.get('set-cookie'),null);
     assert.equal((await fetch(base+'/api/sessions',{headers})).status,200);
@@ -153,10 +153,10 @@ test('wrong codes lock the caller out instead of letting all 10000 be tried',asy
     const bad=()=>fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:'0000'})});
     let sawLock=false;
     for(let i=0;i<7;i++){const r=await bad();if(r.status===429){sawLock=true;
-      const body=await r.json();assert.ok(body.retryAfter>0,'429 phải nói còn phải chờ bao lâu');
+      const body=await r.json();assert.ok(body.retryAfter>0,'429 must say how long is left to wait');
       assert.ok(Number(r.headers.get('retry-after')||0)>=0);break;}}
-    assert.ok(sawLock,'quá 5 lần sai mà vẫn cho thử tiếp là brute-force được trong vài giây');
-    // Đang bị khoá thì code ĐÚNG cũng không đi qua — không thì lockout chỉ là trang trí.
+    assert.ok(sawLock,'allowing more tries after 5 wrong ones makes brute force a matter of seconds');
+    // While locked out even the RIGHT code doesn't pass — otherwise lockout is decoration.
     const r=await fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:PASSCODE})});
     assert.equal(r.status,429);assert.equal(r.headers.get('set-cookie'),null);
   });
@@ -166,25 +166,25 @@ test('the cookie survives a restart, and rotating the token signs every device o
   await withServer(async({base,srv,headers,storageDir})=>{
     const saved=nodeFs.readFileSync(nodePathT.join(storageDir,'mobile-token'),'utf8');
     assert.match(saved,/^[A-Za-z0-9_-]{24,}$/);
-    // Reload Window = dispose + start. Token mint lại mỗi lần là mọi PWA đã login bị đá ra.
+    // Reload Window = dispose + start. Minting the token every time kicks out every signed-in PWA.
     srv.dispose();
     const {port}=await srv.start(0,true);
     const again=`http://127.0.0.1:${port}`;
-    assert.equal((await fetch(again+'/api/sessions',{headers})).status,200,'cookie cũ phải còn giá trị sau restart');
+    assert.equal((await fetch(again+'/api/sessions',{headers})).status,200,'the old cookie must stay valid after restart');
     srv.rotateToken();
-    assert.equal((await fetch(again+'/api/sessions',{headers})).status,401,'rotate phải huỷ cookie cũ');
+    assert.equal((await fetch(again+'/api/sessions',{headers})).status,401,'rotate must invalidate the old cookie');
   });
 });
 
 test('the PWA install metadata is complete enough for iOS standalone',async()=>{
   await withServer(async({base,headers})=>{
     const html=await (await fetch(base+'/',{headers})).text();
-    // `black-translucent` = iOS 26+ phủ blur lên status bar; `default` cần đi kèm `.ios-top-edge`
-    // thì thanh mới có màu nền thay vì trắng.
+    // `black-translucent` = iOS 26+ lays a blur over the status bar; `default` needs `.ios-top-edge`
+    // for the bar to get a background colour instead of white.
     assert.match(html,/apple-mobile-web-app-status-bar-style" content="default/);
     assert.match(html,/<body><div class="ios-top-edge" aria-hidden="true"><\/div>/);
     assert.ok(/theme-color[^>]*prefers-color-scheme: light/.test(html)&&/theme-color[^>]*prefers-color-scheme: dark/.test(html),html);
-    // Không có `use-credentials` thì manifest bị fetch không kèm cookie → 401.
+    // Without `use-credentials` the manifest is fetched without the cookie → 401.
     assert.match(html,/rel="manifest" href="\/manifest\.webmanifest" crossorigin="use-credentials"/);
     const res=await fetch(base+'/manifest.webmanifest',{headers});
     assert.equal(res.status,200);
@@ -198,13 +198,13 @@ test('the PWA install metadata is complete enough for iOS standalone',async()=>{
 
 test('a cross-origin caller is refused even when it somehow holds the token',async()=>{
   await withServer(async({base,headers,token})=>{
-    // DNS rebinding: trang lạ không đọc được cookie lẫn token, nhưng Origin chốt hẳn.
+    // DNS rebinding: a foreign page can read neither cookie nor token, but Origin pins it shut.
     const evil={...headers,Origin:'http://evil.example'};
     assert.equal((await fetch(base+'/',{headers:evil})).status,403);
     assert.equal((await fetch(base+'/api/sessions',{headers:evil})).status,403);
-    // Không có Origin (client không phải browser) thì vẫn đi được — chỉ token mới là cửa.
+    // No Origin (a non-browser client) still passes — only the token is the door.
     assert.equal((await fetch(base+'/api/sessions',{headers})).status,200);
-    // Origin khớp Host thì đi được: đây là đường của chính trang đó.
+    // Origin matching Host passes: that is the page's own path.
     const host=new URL(base).host;
     assert.equal((await fetch(base+'/api/sessions',
       {headers:{...headers,Origin:'http://'+host}})).status,200);
@@ -217,7 +217,7 @@ test('the same renderer the panel uses is what the phone downloads',async()=>{
     for(const asset of ['chat.js','chat.css','bridge.js','mobile.css']){
       const r=await fetch(base+'/assets/'+asset,{headers});
       assert.equal(r.status,200,asset);
-      assert.ok((await r.text()).length>100,asset+' rỗng');
+      assert.ok((await r.text()).length>100,asset+' empty');
     }
     assert.equal((await fetch(base+'/assets/../package.json',{headers})).status,404);
   });
@@ -226,10 +226,10 @@ test('the same renderer the panel uses is what the phone downloads',async()=>{
 test('mobile footer drops the safe-area inset while the keyboard is open',async()=>{
   await withServer(async({base,headers})=>{
     const css=await (await fetch(base+'/assets/mobile.css',{headers})).text();
-    // Chỉ chốt đúng padding — khai báo còn lại trong rule này là chỗ probe bàn phím iOS
-    // thay đổi, và test ở mobileComposer mới là chỗ giữ phần đó.
+    // Only pin the padding — the other declarations in this rule are where the iOS keyboard probe
+    // changes things, and the mobileComposer test is what guards that part.
     assert.match(css,/body\[data-keyboard="open"\] footer\{padding-bottom:4px[;}]/,
-      'keyboard mở không được cộng safe-area lần nữa');
+      'an open keyboard must not add the safe-area again');
   });
 });
 
@@ -244,7 +244,7 @@ test('a session opened from the phone streams its transcript and drives the real
     assert.equal(sel.events[0].text,'old turn');
     assert.equal(sel.project.name,'proj');
     const opt=await s.wait((m:any)=>m.type==='optionsChanged');
-    assert.equal(opt.slash,true,'nút slash chỉ hiện khi CLI đã khai command');
+    assert.equal(opt.slash,true,'the slash button only shows once the CLI has declared commands');
 
     await s.post({type:'sendPrompt',text:'hi from phone'});
     const echoed=await s.wait((m:any)=>m.type==='event'&&m.event.type==='user_message');
@@ -254,7 +254,7 @@ test('a session opened from the phone streams its transcript and drives the real
     em.emit('event',{provider:'claude',sessionId:'s1',event:{type:'assistant_delta',text:'ab',timestamp:2}});
     em.emit('event',{provider:'claude',sessionId:'s1',event:{type:'assistant_delta',text:'cd',timestamp:3}});
     const batch=await s.wait((m:any)=>m.type==='eventBatch');
-    assert.equal(batch.items.length,1,'delta phải gộp, không thì mỗi chữ một message SSE');
+    assert.equal(batch.items.length,1,'deltas must be batched, or every character is one SSE message');
     assert.equal(batch.items[0].event.text,'abcd');
     s.cancel();
   });
@@ -272,7 +272,7 @@ test('an approval reaches the phone and its answer reaches the CLI',async()=>{
     await new Promise(r=>setTimeout(r,100));
     assert.equal(answered.length,1);
     assert.equal(answered[0][3],true);
-    // Không client nào cầm session -> phải NHƯỜNG, không nhận rồi bỏ đó cho CLI treo.
+    // No client holds the session -> must YIELD, not accept and then leave the CLI hanging.
     assert.equal(srv.showPermission('claude','nobody-holds-this',{requestId:'r2'}),false);
     s.cancel();
   });
@@ -322,16 +322,16 @@ test('the file route serves only media files inside the media roots, with byte r
       fs.writeFileSync(path.join(dir,'secret.txt'),'top secret');fs.writeFileSync(path.join(dir,'clip.mp4'),'0123456789');
       fs.symlinkSync(path.join(dir,'secret.txt'),path.join(dir,'evil.png'));
       const f=(p:string,h:any={})=>fetch(base+'/api/file?f='+encodeURIComponent(p),{headers:{...headers,...h}});
-      assert.equal((await f(path.join(dir,'secret.txt'))).status,403,'gốc giờ gồm cả ~ và tmp: chỉ đuôi media mới được đọc');
-      assert.equal((await f(path.join(dir,'evil.png'))).status,403,'symlink đuôi .png trỏ sang file khác phải chết sau realpath');
+      assert.equal((await f(path.join(dir,'secret.txt'))).status,403,'roots now include ~ and tmp: only media extensions may be read');
+      assert.equal((await f(path.join(dir,'evil.png'))).status,403,'a .png symlink pointing at another file must die after realpath');
       const full=await f(path.join(dir,'clip.mp4'));
       assert.equal(full.status,200);assert.equal(full.headers.get('content-type'),'video/mp4');assert.equal(await full.text(),'0123456789');
       const part=await f(path.join(dir,'clip.mp4'),{range:'bytes=2-4'});
-      assert.equal(part.status,206,'Safari không phát video nếu Range không ra 206');
+      assert.equal(part.status,206,'Safari will not play video unless Range returns 206');
       assert.equal(part.headers.get('content-range'),'bytes 2-4/10');assert.equal(await part.text(),'234');
       assert.equal((await f(path.join(dir,'clip.mp4'),{range:'bytes=50-'})).status,416);
     }finally{fs.rmSync(dir,{recursive:true,force:true});}
-    // Cùng tiền tố chuỗi nhưng khác thư mục: chốt phải ở dấu ngăn, không phải startsWith trần.
+    // Same string prefix but a different folder: the check must anchor on the separator, not a bare startsWith.
 
     assert.equal((await fetch(base+'/api/file?p='+enc('/tmp-evil/x.png'),{headers})).status,403);
   });
@@ -353,11 +353,11 @@ test('option and slash choices come from the provider, not from the phone',async
   });
 });
 
-test('đổi acc Claude từ điện thoại: nhãn theo project, đảo qua host, inherited báo lỗi',async()=>{
+test('switching Claude account from the phone: label per project, toggled through the host, inherited reports an error',async()=>{
   const toggled:string[]=[];let level:any='info';
   await withServer(async({base,headers})=>{
     const list=await (await fetch(base+'/api/sessions',{headers})).json();
-    assert.equal(list.projects[0].account,'acme','mỗi project mang nhãn acc để sheet vẽ');
+    assert.equal(list.projects[0].account,'acme','every project carries an account label for the sheet to draw');
     const s=await stream(base,headers);
     await s.post({type:'switchAccount',projectId:'p1'});
     const ok=await s.wait((m:any)=>m.type==='accountSwitched');
@@ -371,7 +371,7 @@ test('đổi acc Claude từ điện thoại: nhãn theo project, đảo qua hos
     toggle:async(root:string,name:string)=>{toggled.push(root+'|'+name);return level==='info'?{level,message:`${name} → Claude work.`}:{level,message:'covered by parent'};}};});
 });
 
-test('chưa đặt altAccountFile: không có nhãn, switchAccount bị từ chối',async()=>{
+test('altAccountFile not set: no label, switchAccount is refused',async()=>{
   await withServer(async({base,headers})=>{
     const list=await (await fetch(base+'/api/sessions',{headers})).json();
     assert.equal(list.projects[0].account,undefined);
@@ -379,7 +379,7 @@ test('chưa đặt altAccountFile: không có nhãn, switchAccount bị từ ch�
     await s.post({type:'switchAccount',projectId:'p1'});
     await s.wait((m:any)=>m.type==='error'&&/altAccountFile/.test(m.message));
     s.cancel();
-  },true,({deps})=>{deps.accounts={label:()=>undefined,toggle:async()=>{throw new Error('không được gọi');}};});
+  },true,({deps})=>{deps.accounts={label:()=>undefined,toggle:async()=>{throw new Error('must not be called');}};});
 });
 
 test('a stale client id is rejected so the phone reconnects instead of talking to nothing',async()=>{
@@ -393,23 +393,23 @@ test('the mobile bridge is valid JavaScript',()=>{
   const file=nodePathT.join(process.cwd(),'media','mobile','bridge.js');
   const src=nodeFs.readFileSync(file,'utf8');
   new Function(src);
-  // Mấy message này KHÔNG được gửi ra server: trên điện thoại không có QuickPick nào để mở.
+  // These messages must NOT be sent to the server: the phone has no QuickPick to open.
   for(const local of ['pickModel','pickEffort','pickProvider','pickProject','pickSlash','pickHistory'])
-    assert.ok(src.includes(local),'bridge thiếu xử lý cục bộ cho '+local);
+    assert.ok(src.includes(local),'the bridge lacks local handling for '+local);
 });
 
 test('the phone shows the images a Claude turn was sent with, like the panel does',async()=>{
   await withServer(async({base,headers,storageDir,setTranscript})=>{
     const img=nodePathT.join(storageDir,'devhub','attachments','1-a.png');
-    // Claude ghi ảnh vào prompt dưới dạng path, nên transcript đọc lại chỉ có mấy dòng đó.
-    setTranscript([{type:'user_message',text:img+'\nxem ảnh',timestamp:1}]);
+    // Claude writes images into the prompt as paths, so a re-read transcript only has those lines.
+    setTranscript([{type:'user_message',text:img+'\nlook at the image',timestamp:1}]);
     const s=await stream(base,headers);
     await s.post({type:'openSession',provider:'claude',id:'s1'});
     const sel=await s.wait((m:any)=>m.type==='sessionSelected');
     const um=sel.events.find((e:any)=>e.type==='user_message');
-    assert.equal(um.text,'xem ảnh','đường dẫn phải rời khỏi phần chữ');
+    assert.equal(um.text,'look at the image','paths must be split off the text');
     assert.equal(um.imageSrcs.length,1);
-    assert.ok(String(um.imageSrcs[0]).startsWith('/api/file?p='),'ảnh phải đi qua route file của server: '+um.imageSrcs[0]);
+    assert.ok(String(um.imageSrcs[0]).startsWith('/api/file?p='),'images must go through the server\'s file route: '+um.imageSrcs[0]);
     s.cancel();
   });
 });
@@ -419,7 +419,7 @@ test('Stop on the phone keeps the queue and sends it once the turn is dead',asyn
     const s=await stream(base,headers);
     await s.post({type:'openSession',provider:'claude',id:'s1'});
     await s.wait((m:any)=>m.type==='sessionSelected');
-    // Lượt đang chạy: hai tin gõ thêm phải vào hàng chờ.
+    // A turn is running: two more typed messages must be queued.
     em.emit('sessionUpdated',{...session,status:'running'});
     await s.post({type:'sendPrompt',text:'queued one'});
     await s.post({type:'sendPrompt',text:'queued two'});
@@ -428,11 +428,11 @@ test('Stop on the phone keeps the queue and sends it once the turn is dead',asyn
 
     await s.post({type:'cancel'});
     await new Promise(r=>setTimeout(r,80));
-    assert.equal(calls.turn,undefined,'Stop không được tự gửi gì trong lúc lượt còn đang chết');
-    // `sessionUpdated` sau Stop là chỗ scheduleFlush chạy — hàng chờ còn nguyên nên gửi tiếp.
+    assert.equal(calls.turn,undefined,'Stop must not send anything by itself while the turn is still dying');
+    // `sessionUpdated` after Stop is where scheduleFlush runs — the queue is intact so sending continues.
     em.emit('sessionUpdated',{...session,status:'cancelled'});
     await s.wait((m:any)=>m.type==='queue'&&m.items.length===1);
-    assert.deepEqual(calls.turn,{kind:'resume',text:'queued one'},'Stop xong hàng chờ phải chạy tiếp');
+    assert.deepEqual(calls.turn,{kind:'resume',text:'queued one'},'after Stop the queue must keep running');
     s.cancel();
   });
 });
@@ -445,11 +445,11 @@ test('switching to the other provider drops options that only mean something to 
     await s.wait((m:any)=>m.type==='sessionSelected');
     await s.post({type:'setOption',kind:'model',value:'opus'});
     await s.wait((m:any)=>m.type==='optionsChanged'&&m.model==='opus');
-    // `opus` không phải model của planner; mang sang là hỏng nguyên lượt.
+    // `opus` is not a planner model; carrying it over breaks the whole turn.
     await s.post({type:'openSession',provider:'planner',id:'c1'});
     await s.wait((m:any)=>m.type==='sessionSelected'&&m.session.provider==='planner');
     const opt=await s.wait((m:any)=>m.type==='optionsChanged'&&m.provider==='planner');
-    assert.equal(opt.model,undefined,'model phải về mặc định của provider mới');
+    assert.equal(opt.model,undefined,'the model must reset to the new provider\'s default');
     s.cancel();
   });
 });
@@ -459,12 +459,12 @@ test('a message replayed after a dropped connection runs once, not twice',async(
     const s=await stream(base,headers);
     await s.post({type:'openSession',provider:'claude',id:'s1',__id:'a1'});
     await s.wait((m:any)=>m.type==='sessionSelected');
-    // fetch có thể reject SAU khi server đã xử lý xong; bridge gửi lại đúng tin đó.
-    const again={type:'sendPrompt',text:'chỉ một lần',__id:'a2'};
+    // fetch may reject AFTER the server finished handling it; the bridge resends that exact message.
+    const again={type:'sendPrompt',text:'only once',__id:'a2'};
     await s.post(again);await s.post(again);
     await new Promise(r=>setTimeout(r,120));
-    const sent=s.msgs.filter((m:any)=>m.type==='event'&&m.event.type==='user_message'&&m.event.text==='chỉ một lần');
-    assert.equal(sent.length,1,'tin trùng __id phải bị bỏ');
+    const sent=s.msgs.filter((m:any)=>m.type==='event'&&m.event.type==='user_message'&&m.event.text==='only once');
+    assert.equal(sent.length,1,'a message with a duplicate __id must be dropped');
     s.cancel();
   });
 });
@@ -475,12 +475,12 @@ test('reopening the session already on screen keeps what is queued for it',async
     await s.post({type:'openSession',provider:'claude',id:'s1'});
     await s.wait((m:any)=>m.type==='sessionSelected');
     em.emit('sessionUpdated',{...session,status:'running'});
-    await s.post({type:'sendPrompt',text:'đợi lượt này xong'});
+    await s.post({type:'sendPrompt',text:'wait for this turn to finish'});
     await s.wait((m:any)=>m.type==='queue'&&m.items.length===1);
-    // bridge gửi openSession mỗi lần nối lại; xoá hàng chờ ở đây là mất chữ vì rớt sóng.
+    // The bridge sends openSession on every reconnect; clearing the queue here loses text to a dropped signal.
     await s.post({type:'openSession',provider:'claude',id:'s1'});
     await new Promise(r=>setTimeout(r,120));
-    assert.deepEqual(s.msgs.filter((m:any)=>m.type==='queue').pop().items.map((i:any)=>i.text),['đợi lượt này xong']);
+    assert.deepEqual(s.msgs.filter((m:any)=>m.type==='queue').pop().items.map((i:any)=>i.text),['wait for this turn to finish']);
     s.cancel();
   });
 });
@@ -488,10 +488,10 @@ test('reopening the session already on screen keeps what is queued for it',async
 test('the bridge waits for the server to confirm the session before flushing its outbox',()=>{
   const src=nodeFs.readFileSync(nodePathT.join(process.cwd(),'media','mobile','bridge.js'),'utf8');
   new Function(src);
-  // Hai POST là hai request HTTP; xả outbox ngay sau openSession là đua với chính nó.
-  assert.match(src,/restoring=setTimeout\(doneRestoring/,'phải chờ xác nhận, có hạn giờ thoát');
-  assert.equal(/id:last\.id\}\);\s*flush\(\);/.test(src),false,'không được flush ngay sau openSession');
-  assert.match(src,/msg\.__id=/,'mỗi tin phải có id để server bỏ bản trùng');
+  // Two POSTs are two HTTP requests; flushing the outbox right after openSession races itself.
+  assert.match(src,/restoring=setTimeout\(doneRestoring/,'must wait for confirmation, with a timeout escape');
+  assert.equal(/id:last\.id\}\);\s*flush\(\);/.test(src),false,'must not flush right after openSession');
+  assert.match(src,/msg\.__id=/,'every message must have an id so the server can drop duplicates');
 });
 
 test('the bridge remembers the project with the selected session',()=>{
@@ -512,24 +512,24 @@ test('a gone restored session falls back to its remembered project',async()=>{
 });
 
 test('a dead-end restore still flushes what was queued while offline',async()=>{
-  // Không có projectId thì không còn đường gắn lại; outbox vẫn phải ra, nếu không tin
-  // nằm lại tới lần reconnect sau mới bắn — trễ và sai ngữ cảnh.
+  // Without a projectId there is no way to reattach; the outbox must still go out, or the message
+  // sits until the next reconnect fires it — late and out of context.
   const b=bootBridge(PROJECT_STATE(1),{provider:'claude',id:'stale-id'});
   b.socket.onerror();
-  b.api.postMessage({type:'sendPrompt',text:'gõ lúc mất mạng'});
+  b.api.postMessage({type:'sendPrompt',text:'typed while offline'});
   await flush();
-  assert.equal(b.posted.filter((m:any)=>m.type==='sendPrompt').length,0,'chưa nối lại thì nằm trong outbox');
+  assert.equal(b.posted.filter((m:any)=>m.type==='sendPrompt').length,0,'stays in the outbox until reconnected');
   b.socket.onmessage({data:JSON.stringify({type:'hello',clientId:'c2'})});
   await flush();
-  assert.equal(b.posted.filter((m:any)=>m.type==='sendPrompt').length,0,'đang gắn lại thì chưa xả');
+  assert.equal(b.posted.filter((m:any)=>m.type==='sendPrompt').length,0,'not flushed while reattaching');
   b.socket.onmessage({data:JSON.stringify({type:'error',message:'That session is gone.'})});
   await flush();
-  assert.equal(b.posted.filter((m:any)=>m.type==='sendPrompt').length,1,'hết đường gắn lại thì phải xả');
+  assert.equal(b.posted.filter((m:any)=>m.type==='sendPrompt').length,1,'must flush once there is no way to reattach');
 });
 
 /**
- * Cả lý do tồn tại của trang này là mở được từ điện thoại: bind loopback là link chỉ chạy
- * trên chính máy chạy extension. Máy CI có thể không có IP LAN nào — lúc đó bỏ qua.
+ * The whole reason this page exists is to be opened from a phone: binding loopback makes the link only work
+ * on the machine running the extension. A CI machine may have no LAN IP — skip then.
  */
 test('the server answers on the LAN address when it is told to',async()=>{
   const {lanAddress}=require('../../src/devhub/web/mobileServer');
@@ -538,8 +538,8 @@ test('the server answers on the LAN address when it is told to',async()=>{
     if(!lan)return;
     const port=new URL(ctx.base).port;
     const res=await fetch(`http://${lan}:${port}/`,{headers:ctx.headers});
-    assert.equal(res.status,200,'điện thoại cùng Wi-Fi phải gọi tới được');
-    assert.match(await res.text(),/<div/,'phải là trang chat thật');
+    assert.equal(res.status,200,'a phone on the same Wi-Fi must be able to reach it');
+    assert.match(await res.text(),/<div/,'must be the real chat page');
   },true);
 });
 
@@ -549,25 +549,25 @@ test('with devHub.mobile.lan off nothing outside this machine can reach it',asyn
     const lan=lanAddress();
     if(!lan)return;
     const port=new URL(ctx.base).port;
-    // Loopback vẫn phải chạy, còn IP LAN thì phải bị từ chối ở tầng socket.
+    // Loopback must still work, while the LAN IP must be refused at the socket level.
     assert.equal((await fetch(ctx.base+'/',{headers:ctx.headers})).status,200);
     await assert.rejects(fetch(`http://${lan}:${port}/`,{headers:ctx.headers}),
-      'bind loopback thì cổng không được nghe trên IP LAN');
+      'binding loopback means the port must not listen on the LAN IP');
   },false);
 });
 
 test('lanAddress never hands out a public address',()=>{
   const {lanAddress}=require('../../src/devhub/web/mobileServer');
   const lan=lanAddress();
-  // URL mang token; một IP public trong đó là mời cả internet vào một endpoint chạy CLI.
-  if(lan)assert.match(lan,/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/,`không được trả IP public: ${lan}`);
+  // The URL carries a token; a public IP in it invites the whole internet into an endpoint that runs a CLI.
+  if(lan)assert.match(lan,/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/,`must not return a public IP: ${lan}`);
 });
 
 /**
- * Sheet chọn là phần UI DUY NHẤT chỉ có trên điện thoại, nên nó phải được chạy thật —
- * grep source không thấy được chuyện lọc xong còn dòng nào. DOM giả vừa đủ cho `openSheet`.
+ * The picker sheet is the ONLY phone-only piece of UI, so it must really run —
+ * grepping the source can't tell which rows survive filtering. A fake DOM just big enough for `openSheet`.
  */
-/** fetch giả trả promise: mỗi `.then` là một microtask, nên phải xả vài vòng mới thấy DOM. */
+/** The fake fetch returns promises: each `.then` is a microtask, so drain a few rounds before the DOM shows it. */
 async function flush(){for(let i=0;i<8;i++)await Promise.resolve();}
 function bootBridge(state:any,lastSession?:any){
   const mk=(tag:string):any=>({tag,className:'',hidden:false,type:'',value:'',placeholder:'',children:[] as any[],_t:'',
@@ -578,7 +578,7 @@ function bootBridge(state:any,lastSession?:any){
     setAttribute(){},addEventListener(){},removeAttribute(){},focus(){},
     get classList(){const self=this as any;return {add(c:string){self.className=(self.className+' '+c).trim()}}}});
   const sheet=Object.assign(mk('div'),{id:'sheet'});
-  // Gesture của drawer treo trên document; giữ lại handler mới bắn tay được trong test.
+  // The drawer gesture hangs off document; keep the handler so the test can fire it by hand.
   const handlers:any={};
   const document:any={getElementById:(id:string)=>id==='sheet'?sheet:null,createElement:mk,
     createTextNode:(t:string)=>({textContent:t,children:[]}),
@@ -598,7 +598,7 @@ function bootBridge(state:any,lastSession?:any){
     getItem(){return this.value;},setItem(_key:string,value:string){this.value=value;}};
   new Function('window','document','localStorage','EventSource','fetch','setTimeout','clearTimeout',src)(
     win,document,storage,ES,fetchStub,(fn:Function)=>1,()=>{});
-  // Không có `hello` thì mọi POST nằm lại outbox — bridge cố ý không gửi khi chưa có clientId.
+  // Without `hello` every POST stays in the outbox — the bridge deliberately doesn't send before it has a clientId.
   sockets[0].onmessage({data:JSON.stringify({type:'hello',clientId:'c1'})});
   const all=(cls:string)=>{const out:any[]=[];const walk=(n:any)=>{for(const c of n.children||[]){
     if(String(c.className||'').split(' ').indexOf(cls)>=0)out.push(c);walk(c)}};walk(sheet);return out};
@@ -620,31 +620,31 @@ test('the project sheet filters by keyword across the name and its workspace',as
   const b=bootBridge(PROJECT_STATE(12));
   b.api.postMessage({type:'pickProject'});
   await flush();
-  assert.equal(b.rows().length,12,'sheet phải dựng đủ 12 dòng');
-  assert.ok(b.input(),'12 dòng thì phải có ô lọc');
-  // Mỗi từ khoá khớp độc lập: tên repo dài thì người ta nhớ hai mảnh rời, không nhớ chuỗi liền.
+  assert.equal(b.rows().length,12,'the sheet must build all 12 rows');
+  assert.ok(b.input(),'12 rows means a filter box');
+  // Each keyword matches independently: with long repo names people remember two separate pieces, not one run.
   b.input().value='chat admin';b.input().oninput();
   assert.deepEqual(b.shown().map(b.label),['order-chatbot-admin-system']);
-  // Lọc được cả theo workspace, vì đó là thứ hay được nhớ thay cho tên đầy đủ.
+  // Filtering also works by workspace, since that is often remembered instead of the full name.
   b.input().value='acme';b.input().oninput();
   assert.equal(b.shown().length,12);
   b.input().value='khong-co-repo-nao';b.input().oninput();
   assert.equal(b.shown().length,0);
   b.clear().onclick();
-  assert.equal(b.shown().length,12,'✕ trả lại danh sách đầy');
-  // Chọn xong thì vẫn phải là openProject của dòng đúng, kể cả khi đang lọc.
+  assert.equal(b.shown().length,12,'✕ restores the full list');
+  // Picking must still be openProject of the right row, even while filtering.
   b.input().value='repo-7';b.input().oninput();
   b.shown()[0].onclick();
   assert.deepEqual(b.posted.map((m:any)=>({type:m.type,projectId:m.projectId})),[{type:'openProject',projectId:'p7'}]);
-  assert.equal(b.sheet.hidden,true,'chọn xong thì sheet đóng');
+  assert.equal(b.sheet.hidden,true,'picking closes the sheet');
 });
 
 test('a short list gets no filter box, and only the session sheet stacks its rows',async()=>{
   const few=bootBridge(PROJECT_STATE(4));
   few.api.postMessage({type:'pickProject'});
   await flush();
-  assert.equal(few.input(),undefined,'4 dòng thì ô lọc chỉ chiếm chỗ');
-  // Project: một dòng (chú thích là tên workspace). Session: hai tầng, chú thích dài hơn nhãn.
+  assert.equal(few.input(),undefined,'with 4 rows a filter box only takes space');
+  // Project: one line (caption is the workspace name). Session: two tiers, caption longer than the label.
   assert.deepEqual(few.rows().map((r:any)=>r.className),Array(4).fill('sheet-row'));
 
   const ss=bootBridge({workspaces:[],projects:[],sessions:[{provider:'claude',nativeSessionId:'a',title:'impl',
@@ -655,8 +655,8 @@ test('a short list gets no filter box, and only the session sheet stacks its row
 });
 
 /**
- * Chạy THẬT script bàn số trong DOM tí hon. Grep chuỗi không bắt được lỗi này: bug cũ là
- * `if(code.length>=4)send()` — đúng cú pháp, đúng ý đồ, chỉ sai với passcode dài hơn 4.
+ * Runs the keypad script FOR REAL in a tiny DOM. Grepping strings can't catch this bug: the old one was
+ * `if(code.length>=4)send()` — valid syntax, right intent, wrong only for passcodes longer than 4.
  */
 function bootKeypad(passcode='1234'){
   const src=String(keypadHtml(passcode)).match(/<script nonce="[^"]*">([\s\S]*?)<\/script>/)![1];
@@ -665,7 +665,7 @@ function bootKeypad(passcode='1234'){
     appendChild(c:any){this.children.push(c);return c},
     set textContent(v:string){this._t=v;this.children.length=0},get textContent(){return this._t}};return n;};
   const dots=mk('div'),msg=mk('div'),pad=mk('div');
-  // `#pw`/`#go` nằm trong HTML tĩnh (autofocus cần vậy), nên harness phải dựng sẵn như parser.
+  // `#pw`/`#go` are in static HTML (autofocus needs that), so the harness must prebuild them like the parser.
   const pw=mk('input'),go=mk('button');
   const byId:any={dots,msg,pad,pw,go};
   const calls:any[]=[];let replaced='';
@@ -674,10 +674,10 @@ function bootKeypad(passcode='1234'){
     return Promise.resolve({status:204,json:()=>Promise.resolve({})});};
   new Function('document','fetch','location',src)(document,fetchFn,{replace:(p:string)=>{replaced=p;}});
   const tap=(label:string)=>{const b=pad.children.find((c:any)=>c.textContent===label);
-    assert.ok(b,'không có phím "'+label+'"');b.onclick();};
+    assert.ok(b,'no key "'+label+'"');b.onclick();};
   return {tap,calls,dots,msg,pad,pw,go,get replaced(){return replaced;}};
 }
-/** `keypad()` chỉ ghi vào res, không cần mở port nào — dựng server rồi gọi thẳng. */
+/** `keypad()` only writes to res, no port needed — build the server and call it directly. */
 function keypadHtml(passcode='1234'){
   const original=Module._load;
   Module._load=function(r:string){if(r==='vscode')return VSCODE;return original.apply(this,arguments as any);};
@@ -691,73 +691,73 @@ function keypadHtml(passcode='1234'){
 }
 
 test('the keypad fires at exactly the length the server accepts', async()=>{
-  // Đây là giao kèo đã từng vỡ: bàn số KHÔNG có nút gửi, nó tự gửi khi đủ độ dài. Nới
-  // `PASSCODE_RE` mà quên bàn số là đặt một passcode không bao giờ gõ vào được.
+  // This is a contract that once broke: the keypad has NO send button, it sends itself at full length. Widening
+  // `PASSCODE_RE` while forgetting the keypad sets a passcode that can never be typed.
   const { PASSCODE_RE }=require('../../src/devhub/web/mobileServer');
   const len=[...Array(20).keys()].filter(n=>PASSCODE_RE.test('1'.repeat(n)));
   assert.deepEqual(len,[4,8,9,10,11,12,13,14,15,16,17,18,19],
-    'chỉ hai nhánh: 4 (bàn số tự gửi) và >=8 (ô nhập + nút gửi)');
-  assert.equal(PASSCODE_RE.test('a'.repeat(129)),false,'trần 128 ký tự');
-  assert.equal(PASSCODE_RE.test('Anh vip_1'),false,'khoảng trắng không được: dán vào ô nhập là gõ sai mà không thấy');
+    'only two branches: 4 (keypad auto-sends) and >=8 (input + send button)');
+  assert.equal(PASSCODE_RE.test('a'.repeat(129)),false,'128 character cap');
+  assert.equal(PASSCODE_RE.test('Anh vip_1'),false,'no whitespace: pasting into the input would be a typo you cannot see');
   const k=bootKeypad();
   for(const d of ['1','2','3'])k.tap(d);
-  assert.deepEqual(k.calls,[],'chưa đủ độ dài thì đừng tốn một lần thử của rate-limit');
+  assert.deepEqual(k.calls,[],'too short means do not spend a rate-limit attempt');
   k.tap('4');
   assert.deepEqual(k.calls,[{code:'1234'}]);
   await new Promise(r=>setTimeout(r,0));
-  assert.equal(k.replaced,'/','204 rồi phải rời trang bàn số');
+  assert.equal(k.replaced,'/','after 204 it must leave the keypad page');
 });
 
 test('the keypad has no submit button and cannot overrun the passcode length', async()=>{
   const k=bootKeypad();
   assert.equal(k.pad.children.some((c:any)=>c.textContent==='OK'),false,
-    'thêm nút gửi là đổi giao kèo ở trên — sửa cả hai chỗ hoặc không sửa chỗ nào');
+    'adding a send button changes the contract above — change both places or neither');
   for(const d of ['1','2','3','4','5','6'])k.tap(d);
-  assert.deepEqual(k.calls,[{code:'1234'}],'gửi đúng một lần, phím sau đó không gửi thêm');
+  assert.deepEqual(k.calls,[{code:'1234'}],'sends exactly once, later keys send nothing more');
 });
 
 /**
- * Nhánh passcode dài: server không biết độ dài để tự gửi, nên giao kèo ĐỔI — có nút gửi, và
- * bàn số không được dựng. Chạy thật script để bắt trường hợp nhánh `pin` rơi sai mặt trang.
+ * The long passcode branch: the server can't know the length to auto-send, so the contract CHANGES — there is a send button, and
+ * the keypad must not be built. Run the script for real to catch the `pin` branch landing on the wrong page variant.
  */
 test('a long passcode swaps the pad for a text field and a submit button', async()=>{
   const html=keypadHtml('Anhvip_123');
-  assert.match(html,/<input id="pw"[^>]*autofocus/,'autofocus phải nằm trong HTML tĩnh mới ăn trên WebKit');
+  assert.match(html,/<input id="pw"[^>]*autofocus/,'autofocus must be in static HTML to work on WebKit');
   assert.match(html,/<input id="pw"[^>]*type="password"/);
-  assert.equal(/class="wide">Unlock</.test(html),true,'phải có nút gửi');
+  assert.equal(/class="wide">Unlock</.test(html),true,'must have a send button');
 
   const k=bootKeypad('Anhvip_123');
-  assert.deepEqual(k.pad.children,[],'passcode dài thì không dựng bàn số nữa');
-  assert.deepEqual(k.dots.children,[],'ô tròn đếm 4 ký tự cũng vô nghĩa ở đây');
+  assert.deepEqual(k.pad.children,[],'a long passcode no longer builds the keypad');
+  assert.deepEqual(k.dots.children,[],'the 4-dot counter is meaningless here too');
 
   k.go.onclick();
-  assert.deepEqual(k.calls,[],'ô rỗng thì đừng đốt một lần thử của rate-limit');
-  assert.equal(k.pw.focused,1,'…mà focus NGAY trong tap handler: iOS chỉ mở bàn phím theo đường đó');
+  assert.deepEqual(k.calls,[],'an empty input must not burn a rate-limit attempt');
+  assert.equal(k.pw.focused,1,'…but focus RIGHT inside the tap handler: iOS only opens the keyboard that way');
 
   k.pw.value='Anhvip_123';k.go.onclick();
-  assert.deepEqual(k.calls,[{code:'Anhvip_123'}],'gửi cả chuỗi, không cắt theo độ dài nào');
+  assert.deepEqual(k.calls,[{code:'Anhvip_123'}],'sends the whole string, not cut to any length');
   await new Promise(r=>setTimeout(r,0));
-  assert.equal(k.replaced,'/','204 rồi phải rời trang');
+  assert.equal(k.replaced,'/','after 204 it must leave the page');
 });
 
 test('Enter in the text field submits like the button', async()=>{
   const k=bootKeypad('Anhvip_123');
   k.pw.value='Anhvip_123';
   k.pw.onkeydown({key:'a'});
-  assert.deepEqual(k.calls,[],'phím thường không gửi');
+  assert.deepEqual(k.calls,[],'ordinary keys do not send');
   k.pw.onkeydown({key:'Enter'});
   assert.deepEqual(k.calls,[{code:'Anhvip_123'}]);
 });
 
 /**
- * Lịch sử trên điện thoại là ngăn kéo mép trái. Hai thứ phải chạy thật chứ grep không thấy:
- * dòng dựng đủ cho MỌI project (đây là cách duy nhất nhảy ngang giữa các repo trên điện
- * thoại), và gesture chỉ mở khi ngón đi ngang từ mép.
+ * History on the phone is a left-edge drawer. Two things must really run, grep can't see them:
+ * rows are built for EVERY project (the only way to jump between repos on the
+ * phone), and the gesture only opens when a finger moves sideways from the edge.
  */
 const HISTORY_STATE={workspaces:[{id:'w1',name:'Acme Work'}],
   projects:[{id:'p0',name:'devhub',workspaceId:'w1',rootPath:'/tmp/0'}],
   sessions:[{provider:'claude',nativeSessionId:'s1',title:'fix mobile header',projectId:'p0',projectName:'devhub',status:'idle',updatedAt:Date.now()},
-            {provider:'planner',nativeSessionId:'s2',title:'khác project',projectId:'p9',projectName:'other',status:'idle',updatedAt:Date.now()}]};
+            {provider:'planner',nativeSessionId:'s2',title:'other project',projectId:'p9',projectName:'other',status:'idle',updatedAt:Date.now()}]};
 
 test('the history drawer lists every session, not just the open project, and opens the one tapped',async()=>{
   const b=bootBridge(HISTORY_STATE);
@@ -765,52 +765,52 @@ test('the history drawer lists every session, not just the open project, and ope
   b.api.postMessage({type:'pickHistory'});
   await flush();
   const d=b.drawer();
-  assert.ok(d&&!d.hidden,'ngăn kéo phải hiện ra');
+  assert.ok(d&&!d.hidden,'the drawer must appear');
   assert.equal(d.className,'open');
   const rows=b.rowsIn(d,'sheet-row');
-  assert.deepEqual(rows.map((r:any)=>r.children[0].textContent),['fix mobile header','khác project'],
-    'session của project khác vẫn phải có mặt');
-  assert.match(rows[1].children[1].textContent,/^other · planner/,'dòng phải tự nói nó thuộc project nào');
-  assert.match(rows[0].className,/\bon\b/,'dòng đang xem phải được tô');
+  assert.deepEqual(rows.map((r:any)=>r.children[0].textContent),['fix mobile header','other project'],
+    'sessions of other projects must still be there');
+  assert.match(rows[1].children[1].textContent,/^other · planner/,'a row must say which project it belongs to');
+  assert.match(rows[0].className,/\bon\b/,'the row being viewed must be highlighted');
   rows[0].onclick();
   const sent=b.posted.pop();
   assert.equal(sent.type,'openSession'); assert.equal(sent.provider,'claude'); assert.equal(sent.id,'s1');
-  assert.equal(d.className,'','tap một dòng phải đóng ngăn kéo lại');
+  assert.equal(d.className,'','tapping a row must close the drawer');
 });
 
 test('a swipe from the left edge opens the drawer, a vertical drag never does',async()=>{
   const b=bootBridge(HISTORY_STATE);
-  // Cuộn dọc bắt đầu ở mép trái: khoá trục dọc rồi thì không được dựng ngăn kéo nào.
+  // A vertical scroll starting at the left edge: once the vertical axis is locked no drawer may be built.
   b.fire('touchstart',6,300); b.fire('touchmove',10,360); b.fire('touchend');
   await flush();
-  assert.equal(b.drawer(),undefined,'kéo dọc không được mở');
-  // Bắt đầu giữa màn hình cũng không: đó là vuốt trong nội dung.
+  assert.equal(b.drawer(),undefined,'a vertical drag must not open it');
+  // Starting mid-screen doesn't either: that is a swipe inside content.
   b.fire('touchstart',200,300); b.fire('touchmove',300,302); b.fire('touchend');
   await flush();
-  assert.equal(b.drawer(),undefined,'chỉ mép trái mới mở');
+  assert.equal(b.drawer(),undefined,'only the left edge opens it');
   b.fire('touchstart',6,300); b.fire('touchmove',240,306); b.fire('touchend');
   await flush();
   const d=b.drawer();
-  assert.ok(d&&!d.hidden,'vuốt ngang từ mép phải mở');
-  assert.equal(d.className,'open','nhả quá 40% thì chốt mở');
-  assert.ok(b.rowsIn(d,'sheet-row').length>0,'nội dung phải nạp trong lúc kéo');
+  assert.ok(d&&!d.hidden,'a horizontal swipe from the edge must open it');
+  assert.equal(d.className,'open','releasing past 40% locks it open');
+  assert.ok(b.rowsIn(d,'sheet-row').length>0,'content must load during the drag');
 });
 
 test('a swipe that stops short snaps the drawer back shut',async()=>{
   const b=bootBridge(HISTORY_STATE);
   b.fire('touchstart',6,300); b.fire('touchmove',30,300); b.fire('touchend');
   await flush();
-  assert.equal(b.drawer().className,'','kéo chưa tới ngưỡng thì bật lại');
+  assert.equal(b.drawer().className,'','a drag short of the threshold springs back');
 });
 
 test('a fresh stream gets mediaBase without ready, and hello carries the page build',async()=>{
   await withServer(async({base,headers,html})=>{
     const s=await stream(base,headers);
-    // SSE nối lại (server restart) KHÔNG gửi `ready` — mediaBase chỉ đi theo `ready` là trang cũ mất media.
+    // An SSE reconnect (server restart) does NOT send `ready` — if mediaBase only came with `ready` the old page would lose media.
     await s.wait((m:any)=>m.type==='mediaBase'&&m.base==='/api/file?f=');
     const hello=s.msgs.find((m:any)=>m.type==='hello');
     const meta=/<meta name="devhub-build" content="([0-9a-f]+)">/.exec(html);
-    assert.ok(meta,'trang phải nhúng build id');assert.equal(hello.build,meta![1]);
+    assert.ok(meta,'the page must embed the build id');assert.equal(hello.build,meta![1]);
     s.cancel();
   });
 });
@@ -830,9 +830,9 @@ test('the bridge reloads a page whose build no longer matches the server, once p
     sources[0].onmessage({data:JSON.stringify({type:'hello',clientId:'c1',build:serverBuild})});
     return reloads;
   };
-  assert.equal(run('aaa','aaa',{}),0,'cùng bản thì không reload');
-  assert.equal(run('aaa','bbb',{}),1,'server lên bản mới mà trang còn JS cũ: phải reload');
-  assert.equal(run('aaa','bbb',{'devhub.reloadFor':'bbb'}),0,'đã reload cho bản này rồi mà vẫn lệch (cache): không được lặp vô hạn');
+  assert.equal(run('aaa','aaa',{}),0,'same build does not reload');
+  assert.equal(run('aaa','bbb',{}),1,'server on a new build while the page runs old JS: must reload');
+  assert.equal(run('aaa','bbb',{'devhub.reloadFor':'bbb'}),0,'already reloaded for this build yet still mismatched (cache): must not loop forever');
 });
 
 test('the phone gets only the tail of a long transcript and pulls older pages on demand',async()=>{
@@ -841,10 +841,10 @@ test('the phone gets only the tail of a long transcript and pulls older pages on
     const s=await stream(base,headers);
     await s.post({type:'openSession',provider:'claude',id:'s1'});
     const first=await s.wait((m:any)=>m.type==='sessionSelected');
-    assert.equal(first.events.length,200,'mở session chỉ được gửi đuôi, không phải cả buffer');
+    assert.equal(first.events.length,200,'opening a session must only send the tail, not the whole buffer');
     assert.equal(first.events[199].text,'m449');
     assert.equal(first.older,250);
-    assert.ok(!first.keepScroll,'mở session thì nhảy xuống đáy');
+    assert.ok(!first.keepScroll,'opening a session jumps to the bottom');
     s.msgs.length=0;
     await s.post({type:'loadOlder'});
     const more=await s.wait((m:any)=>m.type==='sessionSelected');
@@ -855,7 +855,7 @@ test('the phone gets only the tail of a long transcript and pulls older pages on
     const all=await s.wait((m:any)=>m.type==='sessionSelected');
     assert.equal(all.events.length,450);assert.equal(all.older,0);
     s.cancel();
-    // Nối lại SSE = client mới: lại chỉ nhận đuôi, không mang theo cửa sổ đã nới.
+    // An SSE reconnect = a new client: again only the tail, not carrying over the widened window.
     const r=await stream(base,headers);
     await r.post({type:'openSession',provider:'claude',id:'s1'});
     const again=await r.wait((m:any)=>m.type==='sessionSelected');

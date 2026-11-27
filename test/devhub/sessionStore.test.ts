@@ -54,7 +54,7 @@ test('legacy codex rows are dropped on load and gone from the file after the nex
   await fs.mkdir(path.dirname(file), {recursive:true});
   await fs.writeFile(file, JSON.stringify({version:1, sessions:[row('claude','a'), row('codex','b')]}));
   const store = new SessionStore(dir);
-  assert.deepEqual((await store.list()).map((s:any)=>s.provider), ['claude'], 'Codex đã gỡ: hàng cũ không được hiện thành hàng chết');
+  assert.deepEqual((await store.list()).map((s:any)=>s.provider), ['claude'], 'Codex was removed: old rows must not show up as dead rows');
   await store.upsert(row('claude','c') as any);
   const onDisk = JSON.parse(await fs.readFile(file, 'utf8')).sessions.map((s:any)=>s.provider);
   assert.equal(onDisk.includes('codex'), false);
@@ -66,14 +66,14 @@ test('a hand-set name survives a turn writing back the session it captured befor
   const captured = { provider:'claude', nativeSessionId:'abc', workspaceId:'w', projectId:'p', cwd:'/tmp/p', title:'first prompt', status:'running', createdAt:1, updatedAt:1 } as any;
   await store.upsert(captured);
   await store.rename('claude', 'abc', '  Queue   bug ');
-  // Lượt đang chạy ghi lại bản chụp cũ (không có name / name cũ) khi kết thúc.
+  // A running turn writes back an old snapshot (no name / old name) when it ends.
   await store.upsert({ ...captured, status:'done', updatedAt:2 });
   await store.upsert({ ...captured, name:'stale', status:'done', updatedAt:3 });
   let s = (await new SessionStore(dir).list())[0];
   assert.equal(s.name, 'Queue bug');
-  assert.equal(s.title, 'first prompt', 'title gốc không bị đụng');
+  assert.equal(s.title, 'first prompt', 'the original title is untouched');
   assert.equal(s.status, 'done');
   await store.rename('claude', 'abc', '   ');
   s = (await new SessionStore(dir).list())[0];
-  assert.equal(s.name, undefined, 'tên rỗng = quay về prompt đầu');
+  assert.equal(s.name, undefined, 'an empty name = back to the first prompt');
 });

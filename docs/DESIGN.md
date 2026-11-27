@@ -165,8 +165,8 @@ Open on phone…
   and its thinking-token count alive (the row simply re-rendered while the old interval kept
   ticking), and reopening a tab that had been running for minutes restarted it at `0s`.
 - Every block — bubble, assistant text, tool row, permission card — starts on the same 23px
-  left edge (`main` 12px + border + padding). Tin nhắn user có nền chênh sáng với code block
-  và vạch trái 3px để dễ trace ngay cả khi người xem khó phân biệt hue của provider.
+  left edge (`main` 12px + border + padding). User messages get a background slightly lighter than code blocks
+  and a 3px left bar, so they stay traceable even for viewers who can't tell provider hues apart.
 - The transcript sticks to the bottom while streaming unless you scrolled up to read; your own
   message always scrolls into view. Stickiness comes from your `scroll` events and the scroll is
   coalesced to one per frame, so streaming costs no layout per event.
@@ -636,7 +636,7 @@ by `endpoint` (or `devHub.planner.endpoint`).
   conversation id, so the daemon keeps its prompt cache, and `Dev Hub: Ask Task Agent` opens the
   same conversation from the command palette.
 - **Everything is chat; the buttons are a shortcut.** The daemon gives its own chat agent the
-  `planner_*` tools, so "ok làm ABC-1" in a task tab approves it and a turn ending refreshes the
+  `planner_*` tools, so "ok do ABC-1" in a task tab approves it and a turn ending refreshes the
   tree by itself. The tree commands exist for the one thing chat cannot promise: they re-read the
   task and send the exact `plan_version` they just read, with no model between you and that number
   — the API refuses an approval aimed at any other version, and that is the point: an approval must
@@ -804,7 +804,7 @@ rendering wrong before v0.29.51:
    row the child emits lands between two `text_delta`s of the parent. `chat.js` appends a delta
    only when the streaming bubble is still `lastElementChild`, so each interruption closes that
    bubble and opens a new one: one answer arrives as five bubbles split **mid-word**
-   (`… lệch nằm ở b` / `ản design.`). `ClaudeEventParser` now drops every event carrying
+   (`… the drift is in the de` / `sign.`). `ClaudeEventParser` now drops every event carrying
    `parent_tool_use_id`.
 2. The `tool_result` for the `Agent` call returns in the first second with internal metadata
    (`Async agent launched successfully…`), not an answer. Closing the row on it showed a

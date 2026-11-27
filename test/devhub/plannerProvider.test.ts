@@ -33,10 +33,10 @@ test('the state history collapses to one line per event', () => {
   assert.equal(lines.length, 3);
   assert.ok(lines[0].includes('DISCOVERED → ANALYZING'));
   assert.ok(lines[1].includes('"version":1'));
-  assert.ok(lines[2].endsWith('scan'), 'event không payload vẫn phải có một dòng');
+  assert.ok(lines[2].endsWith('scan'), 'an event without payload must still have a row');
 });
 
-/** Daemon giả: `/stream` là bus chung, `/chat` chặn tới khi có câu trả lời cuối. */
+/** A fake daemon: `/stream` is a shared bus, `/chat` blocks until the final answer. */
 function fakeDaemon(views=['Hel','Hello wor','Hello world'],reply='Hello world'){
   const http=require('node:http');
   let sse:any;
@@ -51,7 +51,7 @@ function fakeDaemon(views=['Hel','Hello wor','Hello world'],reply='Hello world')
       const frame=(kind:string,data:any)=>sse?.write(`event: ${kind}\ndata: ${JSON.stringify(data)}\n\n`);
       views.forEach((text,i)=>{
         frame('view',{conversation_id:id,payload:{text}});
-        // Bus dùng chung: chen frame của conversation khác vào giữa để chắc nó bị bỏ.
+        // Shared bus: slip another conversation's frame in between to be sure it is dropped.
         if(i===1)frame('view',{conversation_id:'someone-else',payload:{text:'NOT YOURS'}});
       });
       await new Promise(r=>setTimeout(r,20));
@@ -67,17 +67,17 @@ function fakeDaemon(views=['Hel','Hello wor','Hello world'],reply='Hello world')
 
 test('the partial reply streams as replace-frames, and the last one wins', async()=>{
   const {PlannerProvider,stripViewSuffix}=require('../../src/devhub/providers/planner/plannerProvider');
-  // Đuôi trạng thái của daemon đổi theo giây và KHÔNG phải văn bản trả lời.
+  // The daemon's status tail changes every second and is NOT answer text.
   assert.equal(stripViewSuffix('Hello\n\n_⏳ processing… 12s_'),'Hello');
   assert.equal(stripViewSuffix('Hello\n\n_🛠️ 2 tools · 8.3s_'),'Hello');
-  assert.equal(stripViewSuffix('_⏳ processing… 1s_'),'','frame đầu chưa có chữ nào thì phải ra rỗng');
+  assert.equal(stripViewSuffix('_⏳ processing… 1s_'),'','a first frame with no text yet must come out empty');
   const d=await fakeDaemon(['_⏳ processing… 1s_','Hel\n\n_⏳ processing… 2s_','Hello wor\n\n_⏳ processing… 3s_'],'Hello world');
   try{
     const p=new PlannerProvider(d.endpoint);
     const handle=await p.resume({session:{provider:'planner',nativeSessionId:'task:A-1'},prompt:'hi'});
     const got:any[]=[];
     for await(const e of handle.events)got.push(e);
-    // Frame chỉ có đuôi bị bỏ; mỗi frame còn lại là TOÀN BỘ phần đã sinh, không phải delta.
+    // Frames with only a tail are dropped; every other frame is the WHOLE output so far, not a delta.
     assert.deepEqual(got.map(e=>e.type),['assistant_view','assistant_view','assistant_view','turn_done']);
     assert.deepEqual(got.filter(e=>e.type==='assistant_view').map(e=>e.text),['Hel','Hello wor','Hello world']);
   } finally { await d.close(); }
@@ -85,7 +85,7 @@ test('the partial reply streams as replace-frames, and the last one wins', async
 
 test('with no view frame at all the reply is still one message', async()=>{
   const {PlannerProvider}=require('../../src/devhub/providers/planner/plannerProvider');
-  // Daemon không flush /stream (hoặc quá hạn 2s mở stream) — lượt vẫn phải hiện câu trả lời.
+  // The daemon doesn't flush /stream (or the 2s stream-open deadline passes) — the turn must still show the answer.
   const d=await fakeDaemon([],'Hello world');
   try{
     const p=new PlannerProvider(d.endpoint);
@@ -105,20 +105,20 @@ test('a frame from another conversation on the shared bus is dropped', async()=>
     const handle=await p.resume({session:{provider:'planner',nativeSessionId:'task:A-1'},prompt:'hi'});
     const got:any[]=[];
     for await(const e of handle.events)got.push(e);
-    assert.equal(plannerConversationId(handle.getNativeSessionId()),'task:A-1','conversation id là chính session id');
-    // KHÔNG có `user_message`: SessionManager phát nó cho mọi provider, provider phát thêm
-    // một cái nữa là bong bóng câu hỏi hiện hai lần trong transcript.
-    // Ba frame chạy dở + câu trả lời cuối, tất cả đều là replace-frame vào cùng bong bóng.
+    assert.equal(plannerConversationId(handle.getNativeSessionId()),'task:A-1','the conversation id is the session id itself');
+    // NO `user_message`: SessionManager emits it for every provider, and the provider emitting
+    // another one shows the question bubble twice in the transcript.
+    // Three in-progress frames + the final answer, all replace-frames into the same bubble.
     assert.deepEqual(got.map(e=>e.type),Array(4).fill('assistant_view').concat(['turn_done']));
-    // `NOT YOURS` của conversation khác chen giữa bus không được vào bong bóng nào.
+    // Another conversation's `NOT YOURS` slipped into the bus must enter no bubble.
     assert.equal(got.filter((e:any)=>/NOT YOURS/.test(e.text||'')).length,0);
-    assert.equal(got[3].text,'Hello world','câu trả lời cuối ghi đè bong bóng đang stream');
+    assert.equal(got[3].text,'Hello world','the final answer overwrites the streaming bubble');
   } finally { await d.close(); }
 });
 
 test('a session carries its own daemon, so a resume cannot land on another one', async()=>{
   const {PlannerProvider}=require('../../src/devhub/providers/planner/plannerProvider');
-  // A = endpoint trong settings, B = daemon đã sinh ra session. `task:A-1` tồn tại ở cả hai.
+  // A = the endpoint in settings, B = the daemon that created the session. `task:A-1` exists on both.
   const a=await fakeDaemon(['x'],'from A');
   const b=await fakeDaemon(['x'],'from B');
   try{
@@ -126,7 +126,7 @@ test('a session carries its own daemon, so a resume cannot land on another one',
     const handle=await p.resume({session:{provider:'planner',nativeSessionId:'task:A-1',plannerEndpoint:b.endpoint},prompt:'hi'});
     const got:any[]=[];
     for await(const e of handle.events)got.push(e);
-    assert.equal(got.filter((e:any)=>e.type==='assistant_view').pop()?.text,'from B','endpoint của session phải thắng settings');
+    assert.equal(got.filter((e:any)=>e.type==='assistant_view').pop()?.text,'from B','the session\'s endpoint must beat settings');
   } finally { await a.close();await b.close(); }
 });
 
@@ -139,7 +139,7 @@ test('cancel says the daemon keeps going, because it does', async()=>{
     const got:any[]=[];
     for await(const e of handle.events)got.push(e);
     const warn=got.find((e:any)=>e.type==='warning');
-    assert.ok(warn&&/keeps running/.test(warn.message),'phải nói rõ lượt bên daemon vẫn chạy');
+    assert.ok(warn&&/keeps running/.test(warn.message),'must say clearly that the turn is still running on the daemon');
   } finally { await d.close(); }
 });
 
@@ -164,8 +164,8 @@ test('a daemon that refuses the turn reports an error and still closes the turn'
 test('cancel stops waiting on a /chat that never answers',async()=>{
   const { PlannerProvider }=require('../../src/devhub/providers/planner/plannerProvider');
   let posted:any;const started=new Promise(r=>posted=r);
-  // Daemon giả KHÔNG trả lời bao giờ — `/chat` chạy không hạn, nên nếu cancel không destroy
-  // request thì generator await mãi và `waitForIdle()` treo theo daemon.
+  // The fake daemon NEVER answers — `/chat` has no time limit, so if cancel doesn't destroy
+  // the request the generator awaits forever and `waitForIdle()` hangs along with the daemon.
   const client:any={
     stream:(_c:any,onOpen:any)=>{onOpen?.();return {destroy(){}};},
     json:(_m:string,_p:string,_b:any,_t:number,onRequest:any)=>new Promise((_res,rej)=>{
@@ -176,17 +176,17 @@ test('cancel stops waiting on a /chat that never answers',async()=>{
   await started;
   await handle.cancel();
   const events:any[]=await Promise.race([drain,
-    new Promise<any>((_r,rej)=>setTimeout(()=>rej(new Error('iterator vẫn treo sau cancel')),2000))]);
+    new Promise<any>((_r,rej)=>setTimeout(()=>rej(new Error('iterator still hangs after cancel')),2000))]);
   assert.deepEqual(events.map(e=>e.type),['warning','turn_done'],
-    'destroy request là lỗi mình tự gây, không được biến thành bong bóng lỗi');
+    'destroying the request is our own doing and must not become an error bubble');
 });
 
 test('sseFrames cuts on CRLF and CR blank lines, not just LF', () => {
   const { sseFrames }=require('../../src/devhub/providers/planner/plannerProvider');
   const a=sseFrames('event: view\r\ndata: {"a":1}\r\n\r\nevent: view\ndata: {"a":2}\n\nleft');
   assert.deepEqual(a.frames.map((f:string)=>parseSseFrame(f)?.data.a), [1,2]);
-  assert.equal(a.rest, 'left', 'frame chưa đủ phải ở lại buffer');
-  assert.deepEqual(sseFrames('data: {}\r\r').frames.length, 1, 'CR trần cũng là dòng trắng theo spec');
+  assert.equal(a.rest, 'left', 'an incomplete frame must stay in the buffer');
+  assert.deepEqual(sseFrames('data: {}\r\r').frames.length, 1, 'a bare CR is also a blank line per the spec');
   assert.equal(parseSseFrame('event: view\r\ndata: {"payload":{"text":"hi"}}')?.data.payload.text, 'hi');
 });
 
@@ -204,6 +204,6 @@ test('a daemon that frames its stream with CRLF still streams the partial reply'
   reply({reply:'Hello world',conversation_id:'chat:1'});
   const events:any[]=await drain;
   assert.deepEqual(events.map(e=>e.type),['assistant_view','assistant_view','turn_done'],
-    'mất frame CRLF là lượt hoá ra chưa từng stream, và câu cuối bị phát thành message thứ hai');
+    'losing CRLF frames means the turn never streamed, and the final answer is emitted as a second message');
   assert.equal(events[0].text,'Hello wor');
 });

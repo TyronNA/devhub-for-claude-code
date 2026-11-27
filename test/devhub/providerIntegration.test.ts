@@ -25,7 +25,7 @@ process.stdin.on('end',()=>process.exit(0));`;
   await fs.writeFile(file,code,{mode:0o755});return file;
 }
 async function collect(handle:any){const events=[];for await(const e of handle.events)events.push(e);return events;}
-// Session thường trú giữ process con sống; test phải đóng nếu không node không thoát.
+// A resident session keeps the child process alive; the test must close it or node won't exit.
 const live:any[]=[];
 function track<T>(p:T):T{live.push(p);return p}
 test.after(()=>{for(const p of live)(p as any).dispose&&(p as any).dispose()});

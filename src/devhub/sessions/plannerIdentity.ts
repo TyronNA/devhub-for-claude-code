@@ -2,7 +2,7 @@ import { DevHubSession } from '../types';
 
 export const DEFAULT_PLANNER_ENDPOINT='http://127.0.0.1:7341';
 const PREFIX='planner:';
-/** ID nội bộ chứa daemon; chỉ conversation gốc được gửi qua HTTP. */
+/** The internal ID contains the daemon; only the original conversation is sent over HTTP. */
 export function plannerSessionId(endpoint:string,conversationId:string){
   return PREFIX+JSON.stringify([endpoint.replace(/\/+$/,''),plannerConversationId(conversationId)]);
 }

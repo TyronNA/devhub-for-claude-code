@@ -2,9 +2,9 @@ import { ProviderId } from '../types';
 import { parseWebviewMessage, WebviewMessage } from '../views/webviewProtocol';
 
 /**
- * Điện thoại không có QuickPick, nên mấy message `pick*` của webview đổi nghĩa: client tự
- * dựng sheet chọn rồi gửi THẲNG giá trị đã chọn. Đây là phần thêm, `parseWebviewMessage`
- * vẫn là nguồn chuẩn cho các message dùng chung — đừng nới lỏng nó ở đây.
+ * A phone has no QuickPick, so the webview's `pick*` messages change meaning: the client builds
+ * its own picker sheet and sends the chosen value DIRECTLY. This is an addition; `parseWebviewMessage`
+ * stays the source of truth for the shared messages — don't loosen it here.
  */
 export type MobileOnlyMessage=
   {type:'setOption';kind:'model'|'effort';value?:string}|
@@ -16,9 +16,9 @@ export type MobileOnlyMessage=
 
 export type MobileMessage=WebviewMessage|MobileOnlyMessage;
 
-/** Bắt đầu một chat mới thì chỉ có CLI: planner không mở từ project nào. */
+/** Starting a new chat is CLI-only: the planner isn't opened from a project. */
 const NEW_PROVIDERS=new Set(['claude']);
-/** Mở lại session đã có thì mọi provider, kể cả planner — docs/DESIGN.md hứa đúng chuyện này. */
+/** Reopening an existing session works for every provider, planner included — docs/DESIGN.md promises exactly this. */
 const PROVIDERS=new Set(['claude','planner']);
 const id=(v:any,max=400)=>typeof v==='string'&&v.length>0&&v.length<=max?v:undefined;
 

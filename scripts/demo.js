@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Dựng Dev Hub với dữ liệu mẫu để chụp ảnh cho README — không spawn CLI, không đụng ~/.claude.
+// Runs Dev Hub with sample data to take README screenshots — spawns no CLI, never touches ~/.claude.
 //   npm run compile && node scripts/demo.js
-//   → http://127.0.0.1:7801/  trang mobile thật (passcode 0000)
-//   → http://127.0.0.1:7802/  panel chat desktop: đúng HTML/JS/CSS của webview + theme Dark Modern
-// Ctrl+C để tắt.
+//   → http://127.0.0.1:7801/  the real mobile page (passcode 0000)
+//   → http://127.0.0.1:7802/  the desktop chat panel: the webview's exact HTML/JS/CSS + the Dark Modern theme
+// Ctrl+C to stop.
 const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -72,7 +72,7 @@ const transcript = [
 const permission = { requestId: 'demo-perm-1', toolName: 'Bash', displayName: 'Bash',
   description: 'Push the fix branch', input: { command: 'git push -u origin fix/checkout-race' } };
 
-/* ---------- mobile: server thật, manager giả ---------- */
+/* ---------- mobile: real server, fake manager ---------- */
 const { MobileServer } = require(path.join(DIST, 'web/mobileServer.js'));
 const em = new EventEmitter();
 const manager = {
@@ -86,17 +86,17 @@ const srv = new MobileServer({ manager, storageDir, passcode: () => '0000',
   providers: { claude: { id: 'claude', loadTranscript: async (s) => (s.nativeSessionId === 's1' ? transcript : []), slashCommands: () => ['compact', 'review'] } },
   lookup: async () => ({ workspaces, projects }), listSessions: async () => sessions,
   findSession: async (_p, id) => sessions.find((s) => s.nativeSessionId === id), answerPermission: () => {} });
-// Thẻ duyệt chỉ tới được client đang mở đúng session, nên thử lại tới khi có người xem.
+// An approval card only reaches a client that has that session open, so keep retrying until someone is viewing.
 const offer = setInterval(() => { if (srv.isAwaitingPermission('claude', 's1')) return; srv.showPermission('claude', 's1', permission); }, 1000);
 
-/* ---------- desktop: đúng html() của panel, bỏ CSP để nhúng shim ---------- */
+/* ---------- desktop: the panel's exact html(), CSP stripped to inject the shim ---------- */
 const { ChatPanelProvider } = require(path.join(DIST, 'views/chatPanelProvider.js'));
 const html = new ChatPanelProvider({ on: () => () => {} }, {}, async () => ({ workspaces: [], projects: [] }),
   () => {}, () => {}, () => {}).html({});
 const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
 const script = /<script nonce="[^"]+">([\s\S]*)<\/script>/.exec(html)[1];
 const body = /<body>([\s\S]*)<script nonce=/.exec(html)[1];
-// Bảng màu Dark Modern — webview thật nhận các biến này từ VS Code.
+// Dark Modern palette — the real webview receives these variables from VS Code.
 const THEME = {
   'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', 'font-size': '13px',
   'editor-font-family': 'Menlo, Monaco, "Courier New", monospace', foreground: '#cccccc',

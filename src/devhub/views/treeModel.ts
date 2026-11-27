@@ -31,7 +31,7 @@ export function buildTreeModel(workspaces:DevHubWorkspace[],projects:DevHubProje
   });
 }
 
-/** Session mới nhất trên toàn bộ workspace — đang chạy lên trước, rồi theo updatedAt. */
+/** The newest sessions across all workspaces — running ones first, then by updatedAt. */
 export function recentSessions(sessions:DevHubSession[],limit=10):DevHubSession[]{
   return [...sessions].sort((a,b)=>{
     const ar=a.status==='running'?1:0,br=b.status==='running'?1:0;

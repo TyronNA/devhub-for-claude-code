@@ -1,6 +1,6 @@
 import { DevHubEvent, DevHubProject, DevHubSession, ProviderId } from '../types';
-/** Model/effort chọn theo từng lượt; mỗi provider ánh xạ sang cờ CLI riêng của nó.
- *  `images`: đường dẫn ảnh đã lưu — Claude nối vào prompt. */
+/** Model/effort chosen per turn; each provider maps them to its own CLI flags.
+ *  `images`: paths of saved images — Claude appends them to the prompt. */
 export interface TurnOptions { model?:string; effort?:string; images?:string[]; }
 export interface StartSessionInput extends TurnOptions { workspaceId:string; projectId:string; cwd:string; prompt:string; }
 export interface ResumeSessionInput extends TurnOptions { session:DevHubSession; prompt:string; }
@@ -12,7 +12,7 @@ export interface AgentProvider {
   resume(input:ResumeSessionInput):Promise<ProviderTurnHandle>;
   discoverHistory(projects:DevHubProject[], signal?:any):Promise<DevHubSession[]>;
   loadTranscript(session:DevHubSession, signal?:any):Promise<DevHubEvent[]>;
-  /** Huỷ một lượt do CHÍNH CLI mở: lượt đó không đi qua start/resume nên không có
-   *  `ProviderTurnHandle` nào giữ `cancel`. Provider không tự mở lượt thì khỏi cài. */
+  /** Cancels a turn the CLI ITSELF opened: that turn didn't go through start/resume so there is no
+   *  `ProviderTurnHandle` holding `cancel`. Providers that never open turns themselves needn't implement it. */
   interruptOutOfTurn?(nativeId:string):Promise<boolean>;
 }

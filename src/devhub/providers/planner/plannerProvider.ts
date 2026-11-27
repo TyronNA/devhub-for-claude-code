@@ -5,20 +5,20 @@ import { DevHubEvent, DevHubSession } from '../../types';
 import { PlannerClient, PlannerEvent } from './plannerClient';
 
 /**
- * Provider cho agent-planner. Khác Claude ở một điểm: nó KHÔNG spawn
- * process nào. Con planner là daemon chạy 24/7 tự quét Jira, và provider này chỉ
- * nói HTTP với API loopback của nó (`make start` bên repo đó mới là thứ bật/tắt —
- * xem `devHub.agents`).
+ * Provider for agent-planner. It differs from Claude in one way: it does NOT spawn
+ * any process. The planner is a 24/7 daemon that scans Jira by itself, and this provider only
+ * speaks HTTP to its loopback API (`make start` in that repo is what turns it on/off —
+ * see `devHub.agents`).
  *
- * Vì thế `AgentProvider` vừa khít: interface chỉ đòi một `AsyncIterable<DevHubEvent>`,
- * không giả định subprocess, nên panel + tree + mobileServer dùng lại được nguyên.
+ * That's why `AgentProvider` fits exactly: the interface only asks for an `AsyncIterable<DevHubEvent>`,
+ * with no subprocess assumption, so panel + tree + mobileServer are reused unchanged.
  */
 
 const STREAM_OPEN_MS=2000;
 
 /**
- * Dòng trắng phân cách frame có thể là CRLF/LF/CR — spec SSE cho cả ba, và một proxy chen
- * giữa daemon với đây có quyền đổi sang CRLF. Chỉ tìm '\n\n' là mất TRẮNG mọi frame.
+ * The blank line separating frames can be CRLF/LF/CR — the SSE spec allows all three, and a proxy between
+ * the daemon and here may switch to CRLF. Searching only for '\n\n' loses EVERY frame.
  */
 const SSE_SEP=/\r\n\r\n|\n\n|\r\r/;
 export function sseFrames(buf:string):{frames:string[];rest:string}{
@@ -27,7 +27,7 @@ export function sseFrames(buf:string):{frames:string[];rest:string}{
   return {frames,rest:buf};
 }
 
-/** SSE: frame cách nhau bằng dòng trắng, `event:` là kind, `data:` là JSON một dòng. */
+/** SSE: frames separated by a blank line, `event:` is the kind, `data:` is one-line JSON. */
 export function parseSseFrame(raw:string):{kind:string;data:any}|undefined{
   let kind='message';const data:string[]=[];
   for(const line of raw.split(/\r\n|\n|\r/)){
@@ -39,22 +39,22 @@ export function parseSseFrame(raw:string):{kind:string;data:any}|undefined{
 }
 
 /**
- * Stream của planner đi bằng `assistant_view` (THAY THẾ) chứ không phải `assistant_delta`
- * (NỐI THÊM): `view` frame là một message bị daemon sửa tại chỗ, mỗi frame chứa toàn bộ
- * phần đã sinh cộng một đuôi trạng thái đổi theo giây (`\n\n_⏳ processing… 12s_`), nên nối
- * hai frame là nhân bản câu trả lời. Đuôi bị cắt ở đây — nó là chỉ báo chạy, không phải văn
- * bản, và `chat.js` đã có spinner riêng.
+ * The planner streams via `assistant_view` (REPLACE), not `assistant_delta`
+ * (APPEND): a `view` frame is a message the daemon edits in place, each frame holds everything
+ * generated so far plus a status tail that changes every second (`\n\n_⏳ processing… 12s_`), so appending
+ * two frames duplicates the answer. The tail is cut here — it is a running indicator, not
+ * text, and `chat.js` already has its own spinner.
  */
 const VIEW_SUFFIX=/\n*_(?:⏳|🛠️)[^\n]*_\s*$/;
 export function stripViewSuffix(text:string){return String(text||'').replace(VIEW_SUFFIX,'').trimEnd();}
 
-/** `task:KRP-1` -> `KRP-1`. Session nào không phải task thì không có key. */
+/** `task:KRP-1` -> `KRP-1`. A session that isn't a task has no key. */
 export function taskKeyOf(nativeSessionId:string){
   nativeSessionId=plannerConversationId(nativeSessionId);
   return nativeSessionId.startsWith('task:')?nativeSessionId.slice(5):undefined;
 }
 
-/** Lịch sử chuyển trạng thái, gọn thành một dòng mỗi event cho hàng tool gập lại được. */
+/** State transition history, one line per event so the tool row can fold. */
 export function summarizeEvents(events:PlannerEvent[]):string{
   return events.map(e=>{
     const at=e.created_at?new Date(e.created_at*1000).toLocaleString():'';
@@ -74,7 +74,7 @@ export class PlannerProvider implements AgentProvider {
     this.client=new PlannerClient(endpoint,timeoutMs);this.clients.set(endpoint,this.client);
   }
 
-  /** Ưu tiên endpoint trong ID nội bộ để đổi setting không chuyển hội thoại sang daemon khác. */
+  /** Prefer the endpoint in the internal ID so a settings change doesn't move the conversation to another daemon. */
   clientFor(session?:DevHubSession){
     const ep=(session&&plannerEndpoint(session.nativeSessionId))||session?.plannerEndpoint||this.endpoint;
     let c=this.clients.get(ep);
@@ -94,9 +94,9 @@ export class PlannerProvider implements AgentProvider {
   async resume(input:ResumeSessionInput){return this.turn(input.prompt,plannerConversationId(input.session.nativeSessionId),this.clientFor(input.session),plannerEndpoint(input.session.nativeSessionId)||input.session.plannerEndpoint||this.endpoint);}
 
   /**
-   * Một lượt chat. `/chat` chặn tới khi có câu trả lời cuối, còn text chạy dở đi qua
-   * `/stream` — nên phải mở SSE TRƯỚC khi POST, không thì mất mấy frame đầu.
-   * Chỉ lấy frame của đúng conversation này: `/stream` là bus chung cho mọi client.
+   * One chat turn. `/chat` blocks until the final answer, while in-progress text goes through
+   * `/stream` — so SSE must be opened BEFORE the POST, or the first frames are lost.
+   * Only take frames of this exact conversation: `/stream` is a bus shared by every client.
    */
   private turn(prompt:string,conversationId:string,client:PlannerClient,endpoint:string):ProviderTurnHandle{
     const queue:DevHubEvent[]=[];let notify:(()=>void)|undefined;let done=false;let sawView=false;
@@ -114,14 +114,14 @@ export class PlannerProvider implements AgentProvider {
           if(!frame||frame.data?.conversation_id!==conversationId)continue;
           if(frame.kind==='view'){
             const text=stripViewSuffix(frame.data?.payload?.text);
-            // Frame đầu tiên thường chỉ có đuôi trạng thái: bỏ nó đi thì còn chuỗi rỗng,
-            // mà một bong bóng rỗng đọc ra như câu trả lời đã xong mà không có gì.
+            // The first frame often holds only the status tail: stripping it leaves an empty string,
+            // and an empty bubble reads as an answer that finished with nothing in it.
             if(text){sawView=true;push({type:'assistant_view',text,timestamp:now()});}
             continue;
           }
           if(frame.kind==='permission'){
-            // CONFIRM_TOOLS bên planner đang rỗng nên đường này chưa chạy; báo ra
-            // thay vì bỏ im, vì không có UI trả lời thì tool sẽ timeout thành Deny.
+            // The planner's CONFIRM_TOOLS is empty so this path doesn't run yet; report it
+            // rather than drop it silently, because with no UI to answer the tool would time out as Deny.
             push({type:'warning',message:`agent asked for permission (${frame.data?.payload?.req_id||'?'}) and nothing here can answer it`,timestamp:now()});
           }
         }
@@ -129,22 +129,22 @@ export class PlannerProvider implements AgentProvider {
     });
 
     const run=async()=>{
-      // KHÔNG phát `user_message` ở đây: `SessionManager.start/resume` đã phát nó cho MỌI
-      // provider trước khi consume handle. Claude cũng không tự phát — thêm vào là
-      // bong bóng câu hỏi hiện hai lần.
-      // Mở SSE trước, nhưng KHÔNG chờ mãi: header của /stream chỉ tới khi server flush, và
-      // một server không flush sẽ treo cả lượt chat. Quá hạn thì chat tiếp, chỉ mất `permission`.
+      // Do NOT emit `user_message` here: `SessionManager.start/resume` already emits it for EVERY
+      // provider before consuming the handle. Claude doesn't emit it itself either — adding it here makes
+      // the question bubble show twice.
+      // Open SSE first, but DON'T wait forever: /stream's headers only arrive when the server flushes, and
+      // a server that doesn't flush would hang the whole chat turn. Past the deadline, chat on and only lose `permission`.
       await Promise.race([openStream(),new Promise<void>(r=>{const t:any=setTimeout(r,STREAM_OPEN_MS);t?.unref?.();})]);
       try{
-        // Không đặt timeout: một lượt có gọi tool chạy vài phút là bình thường.
+        // No timeout: a turn that calls tools running for minutes is normal.
         const res=await client.json<{reply:string;conversation_id:string}>(
           'POST','/chat',{message:prompt,conversation_id:conversationId},0,(r:any)=>{chatReq=r;});
-        // Đã stream thì câu trả lời cuối phải GHI ĐÈ bong bóng đó, y như Claude không phát
-        // `assistant_message` khi đã có delta — phát thêm một message là in câu trả lời hai lần.
+        // Once streamed, the final answer must OVERWRITE that bubble, just as Claude doesn't emit
+        // `assistant_message` once there were deltas — emitting another message prints the answer twice.
         push({type:sawView?'assistant_view':'assistant_message',text:String(res?.reply||''),timestamp:now()});
       }catch(e:any){
-        // Sau `cancel()` thì lỗi ở đây là do chính mình destroy request; báo ra là một bong bóng
-        // lỗi giả ngay sau khi người dùng bấm Stop.
+        // After `cancel()` an error here comes from destroying our own request; reporting it gives a fake error
+        // bubble right after the user pressed Stop.
         if(!cancelled)push({type:'error',message:String(e?.message||e),timestamp:now()});
       }finally{
         push({type:'turn_done',timestamp:now()});
@@ -164,10 +164,10 @@ export class PlannerProvider implements AgentProvider {
       await task.catch(()=>{});
     })();
 
-    // Cancel KHÔNG dừng được lượt của daemon (không có endpoint huỷ), nhưng PHẢI cắt request:
-    // `/chat` không có hạn, nên còn await nó là `waitForIdle()` — tức deactivate/reload — treo
-    // đúng bằng thời gian daemon chạy. Nói thẳng ra thay vì để UI khoe "cancelled" trong khi
-    // daemon vẫn chạy.
+    // Cancel CAN'T stop the daemon's turn (there is no cancel endpoint), but it MUST cut the request:
+    // `/chat` has no deadline, so still awaiting it makes `waitForIdle()` — i.e. deactivate/reload — hang
+    // for exactly as long as the daemon runs. Say so plainly instead of letting the UI show "cancelled" while
+    // the daemon keeps running.
     return {events,cancel:async()=>{
               cancelled=true;
               push({type:'warning',message:'Dev Hub stopped listening, but the daemon keeps running this turn — there is no cancel on its API.',timestamp:now()});
@@ -175,7 +175,7 @@ export class PlannerProvider implements AgentProvider {
             getNativeSessionId:()=>plannerSessionId(endpoint,conversationId)};
   }
 
-  /** Lượt đã lưu của hội thoại -> event. Reminder nổ lúc panel đóng chỉ còn ở đây. */
+  /** A conversation's saved turns -> events. A reminder that fired while the panel was closed only lives here. */
   private async storedTurns(session:DevHubSession):Promise<DevHubEvent[]>{
     try{
       const rows=await this.clientFor(session).messages(plannerConversationId(session.nativeSessionId));
@@ -186,23 +186,23 @@ export class PlannerProvider implements AgentProvider {
           :{type:'assistant_message',text:String(m.text||''),timestamp} as DevHubEvent;
       });
     }catch{
-      // Daemon cũ không có endpoint này. Thiếu lịch sử không đáng chặn plan.
+      // Old daemons lack this endpoint. Missing history isn't worth blocking the plan.
       return [];
     }
   }
 
   /**
-   * Rỗng CÓ CHỦ Ý. Task inbox không phải "lịch sử trên đĩa": nó là trạng thái sống, và
-   * `workspaceId/projectId` là khái niệm của DevHub mà daemon không có — bản cũ phải gán
-   * bừa `projects[0]`, khiến task của daemon chui vào project đầu tiên của cây và cả Recent.
-   * Giờ hàng task do cây dựng dưới Agents (`agents/plannerTasks.ts`) và chỉ được ghi vào
-   * store khi người dùng thật sự mở nó.
+   * Empty ON PURPOSE. The task inbox isn't "history on disk": it is live state, and
+   * `workspaceId/projectId` are Dev Hub concepts the daemon doesn't have — the old version had to assign
+   * `projects[0]` arbitrarily, which put the daemon's tasks into the tree's first project and into Recent.
+   * Now task rows are built by the tree under Agents (`agents/plannerTasks.ts`) and only written to the
+   * store when the user actually opens one.
    */
   async discoverHistory():Promise<DevHubSession[]>{return [];}
 
   /**
-   * Transcript = lượt đã lưu của hội thoại, rồi (với một task) lịch sử trạng thái + plan hiện
-   * tại ở cuối. Trạng thái mới nhất nằm dưới cùng, đúng chỗ mắt nhìn tới.
+   * Transcript = the conversation's saved turns, then (for a task) the state history + the current plan
+   * at the end. The newest state is at the bottom, right where the eye lands.
    */
   async loadTranscript(session:DevHubSession):Promise<DevHubEvent[]>{
     const key=taskKeyOf(session.nativeSessionId);
@@ -214,14 +214,14 @@ export class PlannerProvider implements AgentProvider {
       const history=await client.events(key,30);
       if(history.length)out.push({type:'tool_completed',tool:'planner',
         label:`${key} · ${history.length} events`,summary:summarizeEvents(history),timestamp:at-1});
-    }catch{/* lịch sử thiếu không đáng chặn plan */}
+    }catch{/* missing history isn't worth blocking the plan */}
     try{
       const plan=await client.plan(key);
       out.push({type:'assistant_message',
                 text:`**${key} — plan v${plan.current_version??'?'}**\n\n${plan.plan_markdown||'_(empty)_'}`,
                 timestamp:at});
     }catch{
-      // Chưa có plan là trạng thái bình thường (mới quét thấy), không phải lỗi.
+      // No plan yet is a normal state (just discovered), not an error.
       out.push({type:'warning',message:`no plan stored for ${key} yet`,timestamp:at});
     }
     return out;

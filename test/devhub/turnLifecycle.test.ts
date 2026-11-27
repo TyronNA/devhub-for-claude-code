@@ -13,8 +13,8 @@ test.after(()=>{for(const p of live)p.dispose?.()});
 function track<T>(p:T):T{live.push(p);return p}
 
 /**
- * CLI giả chạy `delayMs` rồi mới phát `result`. Dùng để chứng minh hẹn giờ idle không được
- * đóng process trong lúc lượt còn chạy.
+ * A fake CLI that runs `delayMs` before emitting `result`. Used to prove the idle timer must not
+ * close the process while the turn is still running.
  */
 async function slowClaude(delayMs:number,opts:{dieMidTurn?:boolean}={}){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-slow-'));
@@ -42,23 +42,23 @@ async function drain(h:any){const e:any[]=[];for await(const x of h.events)e.pus
 
 test('the idle timeout never closes a session that is still running a turn',async()=>{
   const exe=await slowClaude(400);
-  // TTL 40ms, lượt dài 400ms: cách cũ đặt hẹn giờ TRƯỚC send() nên nó kill process giữa lượt.
+  // TTL 40ms, turn 400ms: the old code armed the timer BEFORE send() so it killed the process mid-turn.
   const p=track(new ClaudeProvider(new ProcessRunner(),exe,10,undefined,undefined,undefined,40));
   const h=await p.start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'hello'});
   const events=await drain(h);
-  assert.ok(events.some((e:any)=>e.type==='turn_done'),'lượt phải chạy hết, không bị cắt giữa đường');
-  assert.equal(events.some((e:any)=>e.type==='error'),false,'không được có lỗi nào');
+  assert.ok(events.some((e:any)=>e.type==='turn_done'),'the turn must run to the end, not be cut midway');
+  assert.equal(events.some((e:any)=>e.type==='error'),false,'there must be no error');
 });
 
 test('a claude process that dies mid-turn is reported as a failure, not a finished turn',async()=>{
   const exe=await slowClaude(0,{dieMidTurn:true});
   const p=track(new ClaudeProvider(new ProcessRunner(),exe,10));
   const events=await drain(await p.start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'hello'}));
-  // Trước đây pump() resolve lượt trong `finally` -> manager đánh dấu 'done' cho lượt chưa chạy.
+  // pump() used to resolve the turn in `finally` -> the manager marked 'done' a turn that never ran.
   const err=events.find((e:any)=>e.type==='error') as any;
-  assert.ok(err,'phải phát error');
+  assert.ok(err,'must emit error');
   assert.ok(/exited before finishing/.test(err.message),err.message);
-  assert.ok(/out of memory/.test(err.message),'đuôi stderr phải đi kèm để chẩn đoán được');
+  assert.ok(/out of memory/.test(err.message),'the stderr tail must come along so it can be diagnosed');
   assert.equal(events.some((e:any)=>e.type==='turn_done'),false);
 });
 
@@ -68,10 +68,10 @@ test('cancelling a turn is not reported as a crash',async()=>{
   const h=await p.start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'hello'});
   const t:any=setTimeout(()=>void h.cancel(),150); t.unref?.();
   const events=await drain(h);
-  assert.equal(events.some((e:any)=>e.type==='error'),false,'người dùng bấm Stop không phải lỗi');
+  assert.equal(events.some((e:any)=>e.type==='error'),false,'a user pressing Stop is not an error');
 });
 
-// ---------- giới hạn concurrent ----------
+// ---------- concurrency limit ----------
 
 function stubProvider(gateMs:number){
   return {
@@ -99,12 +99,12 @@ async function store(){
 const INPUT={provider:'claude' as const,workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'x'};
 
 test('the concurrency limit holds even when starts race through the await window',async()=>{
-  // Cách cũ đếm `active.size` TRƯỚC nhiều await; ba lệnh start cùng lọt qua cửa "limit = 1".
+  // The old code counted `active.size` BEFORE several awaits; three starts all slipped through "limit = 1".
   const m=new SessionManager(await store(),{claude:stubProvider(30)} as any,1);
   const results=await Promise.allSettled([m.start(INPUT),m.start(INPUT),m.start(INPUT)]);
   const ok=results.filter(r=>r.status==='fulfilled');
   const rejected=results.filter(r=>r.status==='rejected');
-  assert.equal(ok.length,1,'chỉ một lượt được chạy');
+  assert.equal(ok.length,1,'only one turn may run');
   assert.equal(rejected.length,2);
   assert.ok(/already running 1 turns/.test(String((rejected[0] as any).reason?.message)));
   assert.equal(m.runningCount(),1);

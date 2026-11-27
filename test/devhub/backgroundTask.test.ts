@@ -6,9 +6,9 @@ const {ClaudeProvider}=require('../../src/devhub/providers/claude/claudeProvider
 
 const TOOL='toolu_01WjEngdCKTJXv6MZ8nVRBJB';
 /**
- * Chuỗi thật CLI 2.1.272 phát ra với đúng bộ cờ của Dev Hub khi model bắn một Bash nền rồi
- * kết thúc lượt: `result` đóng lượt, rồi MƯỜI GIÂY SAU chính CLI nạp `<task-notification>`
- * vào hàng chờ của nó và chạy tiếp một lượt báo cáo — không ai gõ gì.
+ * The real sequence CLI 2.1.272 emits with Dev Hub's exact flags when the model fires a background Bash then
+ * ends the turn: `result` closes the turn, then TEN SECONDS LATER the CLI itself queues a `<task-notification>`
+ * and runs another report turn — nobody typed anything.
  */
 const TURN=[
   {type:'assistant',message:{content:[{type:'tool_use',id:TOOL,name:'Bash',input:{command:'sleep 12; echo BGDONE',run_in_background:true}}]}},
@@ -32,9 +32,9 @@ function scriptedRunner(){
     const lines:string[]=[];let wake:any;let done=false;
     const push=(v:any)=>{lines.push(JSON.stringify(v));wake?.();};
     return {alive:()=>!done,pid:1,
-      // Chỉ message `user` mở lượt; control_request (`get_usage` sau `result`) thì không.
+      // Only a `user` message opens a turn; a control_request (`get_usage` after `result`) doesn't.
       write(line:string){if(JSON.parse(line).type!=='user')return true;for(const r of TURN)push(r);
-        // Sau `result`: không có lượt nào đang chạy, generator của lượt cũ đã return.
+        // After `result`: no turn is running, the old turn's generator has returned.
         setTimeout(()=>{for(const r of AFTER)push(r);},5);
         return true;},
       stdoutLines:(async function*(){while(!done){if(lines.length)yield lines.shift();else await new Promise(r=>wake=r);}})(),
@@ -42,27 +42,27 @@ function scriptedRunner(){
   }};
 }
 
-test('lượt CLI tự mở sau khi task nền xong không còn rơi xuống sàn',async()=>{
+test('a turn the CLI opens after a background task finishes is no longer dropped',async()=>{
   const p=new ClaudeProvider(scriptedRunner(),'claude',10,undefined,undefined,undefined,0);
   const idle:any[]=[];
   p.setIdleEventSink((id:string,e:any)=>idle.push({id,e}));
   try{
-    const h=await p.start({cwd:process.cwd(),prompt:'chạy nền đi'});
+    const h=await p.start({cwd:process.cwd(),prompt:'run it in the background'});
     const inTurn:any[]=[];for await(const e of h.events)inTurn.push(e);
-    assert.equal(inTurn.at(-1).type,'turn_done','lượt của ta vẫn kết thúc ở `result` đầu');
+    assert.equal(inTurn.at(-1).type,'turn_done','our turn still ends at the first `result`');
     assert.ok(!inTurn.some(e=>e.type==='tool_completed'&&e.callId===TOOL),
-      'dòng bash nền phải còn mở khi lượt kết thúc — biên nhận không phải kết quả');
+      'the background bash row must still be open when the turn ends — a receipt is not a result');
     await new Promise(r=>setTimeout(r,60));
     const kinds=idle.map(x=>x.e.type);
-    assert.ok(kinds.includes('tool_completed'),`task_notification phải đóng dòng bash: ${kinds}`);
-    assert.equal(idle.find(x=>x.e.type==='tool_completed').e.callId,TOOL,'đóng ĐÚNG dòng đã mở');
+    assert.ok(kinds.includes('tool_completed'),`task_notification must close the bash row: ${kinds}`);
+    assert.equal(idle.find(x=>x.e.type==='tool_completed').e.callId,TOOL,'closes EXACTLY the row it opened');
     const say=idle.find(x=>x.e.type==='assistant_message');
-    assert.ok(say&&say.e.text.includes('exit code 0'),'câu báo cáo của lượt nối phải tới nơi');
-    assert.equal(kinds.at(-1),'turn_done','lượt nối cũng phải đóng');
+    assert.ok(say&&say.e.text.includes('exit code 0'),'the follow-up turn report must arrive');
+    assert.equal(kinds.at(-1),'turn_done','the follow-up turn must close too');
   }finally{p.dispose();}
 });
 
-test('lượt ngoài kế hoạch lật status và chặn lượt chồng, rồi nhả ra',async()=>{
+test('an unplanned turn flips status and blocks overlapping turns, then releases',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-oot-'));
   const store=new SessionStore(dir);
   const manager=new SessionManager(store,{claude:{id:'claude',isAvailable:async()=>true,
@@ -75,19 +75,19 @@ test('lượt ngoài kế hoạch lật status và chặn lượt chồng, rồi
 
   const seen:any[]=[];manager.on('event',(x:any)=>seen.push(x.event.type));
   manager.ingestOutOfTurn('claude','n1',{type:'tool_completed',tool:'Bash',label:'sleep',callId:TOOL,timestamp:1} as any);
-  assert.equal(manager.isBusy('claude','n1'),true,'phải bận, nếu không lượt người dùng chồng lên');
+  assert.equal(manager.isBusy('claude','n1'),true,'must be busy, otherwise a user turn overlaps it');
   await new Promise(r=>setTimeout(r,20));
   assert.equal((await store.list())[0].status,'running');
-  manager.ingestOutOfTurn('claude','n1',{type:'assistant_message',text:'xong rồi',timestamp:2} as any);
+  manager.ingestOutOfTurn('claude','n1',{type:'assistant_message',text:'all done',timestamp:2} as any);
   manager.ingestOutOfTurn('claude','n1',{type:'turn_done',timestamp:3} as any);
   assert.equal(manager.isBusy('claude','n1'),false);
   await new Promise(r=>setTimeout(r,20));
-  assert.equal((await store.list())[0].status,'done','done lại để hàng chờ được flush');
+  assert.equal((await store.list())[0].status,'done','done again so the queue can flush');
   assert.deepEqual(seen,['tool_completed','assistant_message','turn_done']);
 });
 
-test('task nền còn chạy thì TTL idle không thu hồi process',async()=>{
-  // Runner giữ im sau `result` để session đứng yên đúng lúc hẹn giờ idle nổ.
+test('idle TTL does not reclaim the process while a background task runs',async()=>{
+  // The runner stays quiet after `result` so the session sits idle right when the idle timer fires.
   const runner:any={isAvailable:async()=>true,spawnDuplex(){
     const lines:string[]=[];let wake:any;let done=false;
     const push=(v:any)=>{lines.push(JSON.stringify(v));wake?.();};
@@ -101,12 +101,12 @@ test('task nền còn chạy thì TTL idle không thu hồi process',async()=>{
   try{
     const h=await p.start({cwd:process.cwd(),prompt:'x'});
     for await(const e of h.events){}
-    await new Promise(r=>setTimeout(r,60));   // vài lần TTL trôi qua
-    assert.equal(p.livePids().length,1,'process phải sống để nhận lượt báo cáo CLI sẽ tự mở');
+    await new Promise(r=>setTimeout(r,60));   // several TTLs pass
+    assert.equal(p.livePids().length,1,'the process must live to receive the report turn the CLI will open');
   }finally{p.dispose();}
 });
 
-test('nút dừng huỷ được lượt CLI tự mở, không còn no-op im lặng',async()=>{
+test('stop cancels a CLI self-opened turn, no longer a silent no-op',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-ootc-'));
   const store=new SessionStore(dir);
   const killed:string[]=[];
@@ -117,34 +117,34 @@ test('nút dừng huỷ được lượt CLI tự mở, không còn no-op im l�
   await manager.start({provider:'claude',workspaceId:'w',projectId:'p',cwd:'/tmp/r',prompt:'x'});
   await manager.waitForIdle();
 
-  // Không có lượt ngoài kế hoạch nào thì dừng phải là no-op thật sự.
+  // With no unplanned turn, stop must be a real no-op.
   await manager.cancel('claude','n1');
-  assert.deepEqual(killed,[],'đừng giết process khi session đang rảnh');
+  assert.deepEqual(killed,[],'do not kill the process while the session is idle');
   assert.equal((await store.list())[0].status,'done');
 
-  manager.ingestOutOfTurn('claude','n1',{type:'assistant_message',text:'đang chạy',timestamp:1} as any);
+  manager.ingestOutOfTurn('claude','n1',{type:'assistant_message',text:'running',timestamp:1} as any);
   await new Promise(r=>setTimeout(r,20));
   assert.equal((await store.list())[0].status,'running');
   await manager.cancel('claude','n1');
-  assert.deepEqual(killed,['n1'],'phải với thẳng xuống provider');
-  assert.equal((await store.list())[0].status,'cancelled','tab dừng quay là nhờ status này');
-  assert.equal(manager.isBusy('claude','n1'),false,'nhả khoá để gửi lượt mới được ngay');
+  assert.deepEqual(killed,['n1'],'must reach straight down to the provider');
+  assert.equal((await store.list())[0].status,'cancelled','this status is what stops the tab spinner');
+  assert.equal(manager.isBusy('claude','n1'),false,'release the lock so a new turn can be sent right away');
 });
 
-test('interruptOutOfTurn giết process dù id thật chỉ tới sau rekey',async()=>{
+test('interruptOutOfTurn kills the process even when the real id only arrives after rekey',async()=>{
   const p=new ClaudeProvider(scriptedRunner(),'claude',10,undefined,undefined,undefined,0);
   try{
-    const h=await p.start({cwd:process.cwd(),prompt:'chạy nền đi'});
+    const h=await p.start({cwd:process.cwd(),prompt:'run it in the background'});
     for await(const e of h.events){}
-    await new Promise(r=>setTimeout(r,60));   // lượt CLI tự mở đã khai session_id 'bg-1'
-    assert.equal(p.livePids().length,1,'process phải còn sống trước khi dừng');
+    await new Promise(r=>setTimeout(r,60));   // the CLI self-opened turn declared session_id 'bg-1'
+    assert.equal(p.livePids().length,1,'the process must be alive before stopping');
     assert.equal(await p.interruptOutOfTurn('bg-1'),true);
-    assert.equal(p.livePids().length,0,'process phải chết hẳn');
-    assert.equal(await p.interruptOutOfTurn('bg-1'),false,'dừng lần hai không có gì để giết');
+    assert.equal(p.livePids().length,0,'the process must be fully dead');
+    assert.equal(await p.interruptOutOfTurn('bg-1'),false,'a second stop has nothing to kill');
   }finally{p.dispose();}
 });
 
-/** Runner điều khiển tay: test tự quyết lúc nào CLI nói gì và lúc nào process chết. */
+/** A hand-driven runner: the test decides when the CLI says what and when the process dies. */
 function manualRunner(){
   const ctl:any={};
   ctl.runner={isAvailable:async()=>true,spawnDuplex(){
@@ -160,30 +160,30 @@ function manualRunner(){
   }};
   return ctl;
 }
-/** Task nền xong, CLI mở lượt báo cáo và đang chạy dở (chưa có `result`). */
+/** Background task finished, the CLI opened a report turn and it is still running (no `result` yet). */
 const SELF_TURN_OPEN=[
   {type:'system',subtype:'background_tasks_changed',tasks:[]},
   {type:'system',subtype:'init',session_id:'bg-1',slash_commands:[]},
   {type:'assistant',message:{content:[{type:'tool_use',id:'toolu_rep',name:'Bash',input:{command:'python3 render.py'}}]}},
 ];
 
-test('TTL idle không thu hồi process giữa lượt CLI tự mở, đóng lượt rồi mới thu hồi',async()=>{
+test('idle TTL does not reclaim the process mid CLI self-opened turn, only after the turn closes',async()=>{
   const ctl=manualRunner();
   const p=new ClaudeProvider(ctl.runner,'claude',10,undefined,undefined,undefined,10);   // TTL 10ms
   try{
     const h=await p.start({cwd:process.cwd(),prompt:'x'});
     for await(const e of h.events){}
     for(const r of SELF_TURN_OPEN)ctl.push(r);
-    // `backgroundTasks` đã về 0 — trước đây đúng lúc này timer đóng process (transcript thật: 1800s/3600s).
+    // `backgroundTasks` is back to 0 — previously this is exactly when the timer closed the process (real transcripts: 1800s/3600s).
     await new Promise(r=>setTimeout(r,60));
-    assert.equal(p.livePids().length,1,'lượt báo cáo đang chạy thì process phải sống');
+    assert.equal(p.livePids().length,1,'the process must live while the report turn runs');
     ctl.push({type:'result',subtype:'success'});
     await new Promise(r=>setTimeout(r,60));
-    assert.equal(p.livePids().length,0,'lượt đóng rồi thì TTL thu hồi như thường');
+    assert.equal(p.livePids().length,0,'once the turn closes the TTL reclaims as usual');
   }finally{p.dispose();}
 });
 
-test('process chết giữa lượt CLI tự mở phải báo lỗi, không để session kẹt running',async()=>{
+test('a process dying mid CLI self-opened turn must report an error, not leave the session stuck running',async()=>{
   const ctl=manualRunner();
   const p=new ClaudeProvider(ctl.runner,'claude',10,undefined,undefined,undefined,0);
   const idle:any[]=[];p.setIdleEventSink((id:string,e:any)=>idle.push(e));
@@ -194,8 +194,8 @@ test('process chết giữa lượt CLI tự mở phải báo lỗi, không đ�
     await new Promise(r=>setTimeout(r,20));
     ctl.crash();
     await new Promise(r=>setTimeout(r,20));
-    assert.equal(idle.at(-1)?.type,'error',`lượt phải được đóng bằng error: ${idle.map(e=>e.type)}`);
-    // Không có event đóng thì manager giữ outOfTurn mãi → isBusy true → hàng chờ không flush.
+    assert.equal(idle.at(-1)?.type,'error',`the turn must be closed with an error: ${idle.map(e=>e.type)}`);
+    // Without a closing event the manager keeps outOfTurn forever → isBusy true → the queue never flushes.
     const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-oote-'));
     const store=new SessionStore(dir);
     const manager=new SessionManager(store,{claude:{id:'claude',isAvailable:async()=>true,
@@ -204,13 +204,13 @@ test('process chết giữa lượt CLI tự mở phải báo lỗi, không đ�
     await manager.start({provider:'claude',workspaceId:'w',projectId:'p',cwd:'/tmp/r',prompt:'x'});
     await manager.waitForIdle();
     for(const e of idle)manager.ingestOutOfTurn('claude','n1',e);
-    assert.equal(manager.isBusy('claude','n1'),false,'nhả khoá để gửi tiếp được');
+    assert.equal(manager.isBusy('claude','n1'),false,'release the lock so sending can continue');
     await new Promise(r=>setTimeout(r,20));
     assert.equal((await store.list())[0].status,'failed');
   }finally{p.dispose();}
 });
 
-test('dừng lượt CLI tự mở không sinh thêm lỗi — cancelOutOfTurn đã ghi cancelled',async()=>{
+test('stopping a CLI self-opened turn adds no error — cancelOutOfTurn already wrote cancelled',async()=>{
   const ctl=manualRunner();
   const p=new ClaudeProvider(ctl.runner,'claude',10,undefined,undefined,undefined,0);
   const idle:any[]=[];p.setIdleEventSink((id:string,e:any)=>idle.push(e));
@@ -221,6 +221,6 @@ test('dừng lượt CLI tự mở không sinh thêm lỗi — cancelOutOfTurn �
     await new Promise(r=>setTimeout(r,20));
     assert.equal(await p.interruptOutOfTurn('bg-1'),true);
     await new Promise(r=>setTimeout(r,20));
-    assert.ok(!idle.some(e=>e.type==='error'),`stop không phải lỗi: ${idle.map(e=>e.type)}`);
+    assert.ok(!idle.some(e=>e.type==='error'),`stop is not an error: ${idle.map(e=>e.type)}`);
   }finally{p.dispose();}
 });

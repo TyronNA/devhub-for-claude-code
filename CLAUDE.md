@@ -9,8 +9,8 @@ An unofficial VS Code extension (`dev-hub-claude-codex`, publisher `local-devhub
 window, without adding those repos as workspace folders. Registered projects are paths only; each
 chat spawns a CLI with the project as `cwd`.
 
-`docs/DESIGN.md` is the design document (`README.md` is the short user-facing page) — it records *why* each behaviour is the way it
-is (permission timeouts, image transport, queue semantics). Read
+`docs/DESIGN.md` is the design document (`README.md` is the short user-facing page). It records
+*why* each behaviour is the way it is (permission timeouts, image transport, queue semantics). Read
 the relevant section before changing behaviour in that area; most of the odd-looking code there is
 load-bearing and the reason is written down.
 
@@ -27,6 +27,7 @@ npm run clean
 node scripts/measure-webview.js HEAD <old-rev>   # webview layout/heap in real Chrome via CDP
 node --expose-gc scripts/measure-host.js         # extension-host CPU/heap over real ~/.claude
 node scripts/audit-sessions.js --days 1          # audit past agent sessions from the CLIs' own transcripts
+node scripts/demo.js                             # sample data on :7801 (mobile, passcode 0000) / :7802 (panel) for screenshots
 ```
 
 Install after packaging: `code --install-extension dev-hub-claude-codex-*.vsix --force`, then
@@ -99,15 +100,16 @@ Load-bearing invariants:
 
 - **Code style is deliberately dense**: multiple statements per line, minimal whitespace, one file
   per concept. Match it; do not reformat or "clean up" surrounding lines.
-- **Comments are in Vietnamese** and explain only the non-obvious *why* (the trap, the constraint).
-  Keep new comments in Vietnamese, terse, and in that spirit. Test assertion messages are Vietnamese
-  in places too.
+- **English only** — comments, UI strings, test names and assertion messages, docs. Comments explain
+  only the non-obvious *why* (the trap, the constraint), tersely. `manifest.test.ts` fails on
+  Vietnamese text anywhere in the tree.
 - Every contributed command needs a `Dev Hub: ` title prefix, a short `shortTitle`, and an icon if
   it appears in a menu — `test/devhub/manifest.test.ts` enforces all three against `package.json`.
 - Model *lists* live in settings (vendors ship models faster than this rebuilds); effort levels stay
   in code because they are fixed, per-CLI flag values.
 - Releases: bump `version` in `package.json`, add a `CHANGELOG.md` section that says what broke and
-  how it was proven, and commit as `vX.Y.Z: <lowercase sentence about the actual change>`. Measured
+  how it was proven, and commit as `vX.Y.Z: <lowercase sentence about the actual change>`; the
+  `release` skill (`.claude/skills/release/`) has the full tag → package → GitHub release steps. Measured
   performance numbers belong in `docs/PERFORMANCE.md` with the script that produced them.
 - Say when something is only covered by tests and not exercised in a real window — the changelog
   does this consistently, and none of the mobile/iOS behaviour is device-verified.

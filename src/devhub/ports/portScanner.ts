@@ -4,13 +4,13 @@ const execFile=util.promisify(cp.execFile);
 const path=require('node:path');
 import { projectForCwd } from '../providers/historyUtils';
 
-// group: nhóm gốc của proc, chỉ set khi nó bị kéo sang nhóm Pinned — ở đó mất ngữ cảnh project.
+// group: the proc's original group, only set when it's pulled into the Pinned group — which loses the project context.
 export interface ListeningProc { pid:number; command:string; cwd?:string; ports:number[]; group?:string; }
 export interface PortGroup { name:string; projectId?:string; known:boolean; pinned?:boolean; procs:ListeningProc[]; }
 
 /**
- * `lsof -F` in ra từng field một dòng, tiền tố là tên field: p=pid, c=command, n=name.
- * Field p/c dính vào process và áp cho mọi dòng n phía sau tới process kế tiếp.
+ * `lsof -F` prints one field per line, prefixed by the field name: p=pid, c=command, n=name.
+ * The p/c fields belong to the process and apply to every following n line until the next process.
  */
 function parseFields(out:string,onName:(pid:number,command:string,name:string)=>void){
   let pid=0,command='';
@@ -35,7 +35,7 @@ export function parseListen(out:string):Map<number,ListeningProc>{
     const port=portOf(name); if(port===undefined)return;
     let p=byPid.get(pid);
     if(!p){p={pid,command:command||String(pid),ports:[]};byPid.set(pid,p);}
-    // Cùng một cổng xuất hiện hai lần khi process bind cả IPv4 và IPv6.
+    // The same port shows up twice when a process binds both IPv4 and IPv6.
     if(!p.ports.includes(port))p.ports.push(port);
   });
   for(const p of byPid.values())p.ports.sort((a,b)=>a-b);
@@ -48,7 +48,7 @@ export function parseCwds(out:string):Map<number,string>{
   return cwds;
 }
 
-/** Không có quyền root nên chỉ thấy process của chính user — đúng phạm vi cần. */
+/** No root, so only the user's own processes are visible — exactly the scope needed. */
 export async function scanListeningPorts(timeoutMs=5000):Promise<ListeningProc[]>{
   let listen='';
   try{ listen=(await execFile('lsof',['-nP','-iTCP','-sTCP:LISTEN','-F','pcn'],{timeout:timeoutMs,maxBuffer:1<<22})).stdout; }
@@ -67,9 +67,9 @@ export async function scanListeningPorts(timeoutMs=5000):Promise<ListeningProc[]
 const SYSTEM='System';
 export const PINNED='Pinned';
 /**
- * Basename của cwd là tên repo trong hầu hết trường hợp, TRỪ khi process chạy từ
- * `~/Library` — ở đó nó là thư mục nội bộ của app (docker cho ra `Data`), nên lấy tên
- * lệnh làm nhãn thay vì một từ vô nghĩa.
+ * The cwd basename is the repo name in most cases, EXCEPT when the process runs from
+ * `~/Library` — there it is an app's internal folder (docker gives `Data`), so use the command
+ * name as the label instead of a meaningless word.
  */
 function groupNameFor(proc:ListeningProc){
   if(!proc.cwd)return '';
@@ -77,17 +77,17 @@ function groupNameFor(proc:ListeningProc){
   return path.basename(proc.cwd);
 }
 /**
- * Group theo project của Dev Hub. Repo chưa add vào Dev Hub vẫn được nhóm riêng theo
- * tên thư mục cwd — nếu dồn hết vào một nhóm thì server thật lẫn với daemon hệ thống.
+ * Grouped by Dev Hub project. Repos not added to Dev Hub still get their own group by
+ * cwd folder name — lumping them together would mix real servers with system daemons.
  */
 export function groupPortsByProject(procs:ListeningProc[],projects:any[],pinned?:Iterable<number>,agents?:{name:string;cwd:string}[]):PortGroup[]{
   const pins=new Set<number>(pinned?[...pinned]:[]);
-  // Agent dùng lại khớp-prefix của project: cwd của nó chính là rootPath của repo bot.
+  // Agents reuse the project prefix match: an agent's cwd is the bot repo's rootPath.
   const agentRoots=(agents||[]).filter(a=>a&&a.name&&a.cwd).map(a=>({name:a.name,rootPath:a.cwd}));
   const groups=new Map<string,PortGroup>();
   const put=(name:string,project:any,proc:ListeningProc,isPin:boolean,agent?:any)=>{
-    // Key ≠ nhãn: hai project khác path nhưng cùng basename ("api") mà chung key thì bị
-    // gộp thành một nhóm. Nhãn vẫn là tên; cwd trong tooltip phân biệt hai nhóm trùng tên.
+    // Key ≠ label: two projects with different paths but the same basename ("api") sharing a key would be
+    // merged into one group. The label is still the name; the cwd in the tooltip tells same-named groups apart.
     const key=isPin?PINNED:project?'p:'+project.id:agent?'a:'+agent.name:'n:'+name+'\u0000'+(proc.cwd||'');
     let g=groups.get(key);
     if(!g){g={name,projectId:project?.id,known:!!project,...(isPin?{pinned:true}:{}),procs:[]};groups.set(key,g);}
@@ -95,11 +95,11 @@ export function groupPortsByProject(procs:ListeningProc[],projects:any[],pinned?
   };
   for(const proc of procs){
     const project=proc.cwd?projectForCwd(projects,proc.cwd):undefined;
-    // Bot chạy từ repo chưa add vào Dev Hub: lấy tên agent, nếu không nhóm Ports gọi nó
-    // bằng basename thư mục còn mục Agents gọi bằng name — cùng một process, hai cái tên.
+    // A bot running from a repo not added to Dev Hub: use the agent name, or the Ports group calls it
+    // by folder basename while the Agents section calls it by name — one process, two names.
     const agent=!project&&proc.cwd?projectForCwd(agentRoots,proc.cwd):undefined;
     const name=project?.name??agent?.name??(groupNameFor(proc)||SYSTEM);
-    // Ghim thì cổng đó SANG nhóm Pinned, không nằm cả hai chỗ — cây có dòng trùng thì khó đọc.
+    // A pinned port MOVES to the Pinned group rather than sitting in both — duplicate tree rows are hard to read.
     const pinnedPorts=pins.size?proc.ports.filter(p=>pins.has(p)):[];
     if(!pinnedPorts.length){put(name,project,proc,false,agent);continue;}
     put(PINNED,undefined,{...proc,ports:pinnedPorts,group:name},true);

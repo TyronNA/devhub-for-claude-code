@@ -1,9 +1,9 @@
 const fs=require('fs');const os=require('os');const nodePath=require('path');
 /**
- * Acc Claude theo project: file `devHub.claude.altAccountFile`, mỗi dòng một thư mục gốc chạy
- * acc phụ; wrapper ở `devHub.claude.executable` đọc CÙNG file đó theo `pwd -P` lúc spawn. Dev Hub
- * không tự chọn acc — nó chỉ sửa file, nên một nguồn duy nhất quyết định, kể cả cho terminal.
- * So bằng realpath vì wrapper dùng `pwd -P`: path qua symlink sẽ lệch nếu so chữ.
+ * Claude account per project: the file `devHub.claude.altAccountFile`, one root folder per line that runs
+ * on the second account; the wrapper in `devHub.claude.executable` reads the SAME file against `pwd -P` at spawn. Dev Hub
+ * never picks an account itself — it only edits the file, so a single source decides, terminals included.
+ * Compared by realpath because the wrapper uses `pwd -P`: a path through a symlink would differ as text.
  */
 export function expandHome(p:string){return p==='~'?os.homedir():p.startsWith('~/')?nodePath.join(os.homedir(),p.slice(2)):p;}
 function real(p:string){try{return fs.realpathSync(p);}catch{return nodePath.resolve(p);}}
@@ -12,13 +12,13 @@ export function readAltRoots(file:string):string[]{
   return text.split('\n').map((l:string)=>l.trim()).filter((l:string)=>l&&!l.startsWith('#')).map((l:string)=>real(expandHome(l)));
 }
 const under=(path:string,root:string)=>path===root||path.startsWith(root.endsWith('/')?root:root+'/');
-/** Dòng nào đang phủ `cwd` — `undefined` = acc mặc định. */
+/** Which line covers `cwd` — `undefined` = the default account. */
 export function altRootFor(file:string,cwd:string){const p=real(cwd);return readAltRoots(file).find(r=>under(p,r));}
 export function isUnder(path:string,root:string){return under(real(path),real(root));}
 /**
- * Bật/tắt acc phụ cho `root`. Tắt chỉ gỡ được dòng của chính nó: project nằm dưới một dòng cha
- * (vd cả `~/work/acme`) thì gỡ dòng con vẫn chạy acc phụ — trả `inherited` để báo, không đụng dòng cha.
- * Ghi tmp + rename: wrapper đọc file mỗi lần spawn, không được thấy file ghi dở.
+ * Toggle the second account for `root`. Turning it off can only remove its own line: a project under a parent line
+ * (e.g. all of `~/work/acme`) still runs on the second account after removing the child line — return `inherited` to say so, without touching the parent.
+ * Write tmp + rename: the wrapper reads the file on every spawn and must never see a half-written file.
  */
 export function toggleAltRoot(file:string,root:string):{alt:boolean;inherited?:string}{
   const path=expandHome(file);const target=real(root);

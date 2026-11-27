@@ -7,10 +7,10 @@ interface Entry { pid:number; at:number; items:StoredPrompt[]; }
 interface QueueFile { version:1; queues:Record<string,Entry>; }
 
 /**
- * Tin đã gõ nhưng chưa gửi chỉ sống trong RAM của host, nên Reload Window là mất sạch.
- * Ghi lại để lần mở session sau còn TRẢ LẠI CHỮ cho người dùng — cố ý không tự gửi:
- * một hàng chờ của cửa sổ trước tự chạy vài ngày sau là lượt không ai yêu cầu.
- * `pid` phân biệt "cửa sổ trước để lại" với hàng chờ của chính tiến trình đang chạy.
+ * Messages typed but not yet sent only live in the host's RAM, so Reload Window wipes them.
+ * They are saved so the next time the session opens the TEXT IS HANDED BACK to the user — deliberately not auto-sent:
+ * a previous window's queue firing days later is a turn nobody asked for.
+ * `pid` tells "left over by a previous window" apart from the running process's own queue.
  */
 export class QueueStore {
   private file:string;
@@ -24,13 +24,13 @@ export class QueueStore {
       const data=await this.load();
       if(items.length)data.queues[key]={pid:process.pid,at:Date.now(),items};
       else delete data.queues[key];
-      // Key `pending:` bị rekey ngay sau lượt đầu nên bản ghi cũ thành mồ côi; quá hạn thì bỏ.
+      // A `pending:` key is rekeyed right after the first turn, so the old record becomes an orphan; drop it once stale.
       const cutoff=Date.now()-MAX_AGE_MS;
       for(const [k,e] of Object.entries(data.queues))if(!(e?.at>cutoff))delete data.queues[k];
       await writeJsonAtomic(this.file,data);
     }).catch(()=>{});
   }
-  /** Trả về hàng chờ do một tiến trình KHÁC để lại, rồi xoá nó đi. */
+  /** Returns the queue left by ANOTHER process, then deletes it. */
   async take(key:string):Promise<StoredPrompt[]>{
     return this.exclusive(async()=>{
       const data=await this.load();

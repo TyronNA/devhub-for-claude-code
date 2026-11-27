@@ -16,8 +16,8 @@ export class SessionStore {
     if(this.data) return this.data;
     if(!this.loading){
       this.loading=readJson<SessionStoreFile>(this.file,{version:1,sessions:[]}).then(data=>{
-        // Codex đã gỡ (0.29.72): bản ghi cũ không còn provider để mở, giữ lại chỉ thành hàng chết
-        // trong tree. Lần ghi kế xoá hẳn khỏi file; lịch sử gốc ở ~/.codex không bị đụng.
+        // Codex was removed (0.29.72): old records have no provider to open them and would only be dead rows
+        // in the tree. The next write removes them from the file; the original history in ~/.codex is untouched.
         data.sessions=data.sessions.filter(s=>s.provider==='claude'||s.provider==='planner').map(scopedPlannerSession);
         this.data=data;
         this.loading=undefined;
@@ -50,8 +50,8 @@ export class SessionStore {
         const session=scopedPlannerSession(input);
         const key=this.key(session.provider,session.nativeSessionId);
         const i=byKey.get(key);
-        // `name` chỉ `rename` được ghi: lượt đang chạy/cancel upsert bản session chụp trước khi
-        // đổi tên, spread thẳng là tên mới bị lật về tên cũ.
+        // `name` is only written by `rename`: a running/cancelled turn upserts a session snapshot taken before the
+        // rename, and spreading it as is would flip the new name back to the old one.
         if(i!==undefined) data.sessions[i]={...data.sessions[i],...session,name:data.sessions[i].name};
         else { byKey.set(key,data.sessions.length); data.sessions.push(session); }
       }
@@ -85,7 +85,7 @@ export class SessionStore {
     const sessions=(await this.load()).sessions;
     const exact=sessions.find(s=>s.provider===provider&&s.nativeSessionId===id);
     if(exact||provider!=='planner'||plannerConversationId(id)!==id)return exact;
-    // Tab cũ chỉ có conversation ID: chỉ khôi phục khi không nhập nhằng daemon.
+    // Old tabs only have a conversation ID: only restore when the daemon is unambiguous.
     const matches=sessions.filter(s=>s.provider==='planner'&&plannerConversationId(s.nativeSessionId)===id);
     return matches.length===1?matches[0]:undefined;
   }

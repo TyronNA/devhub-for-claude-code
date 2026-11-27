@@ -41,23 +41,23 @@ test('a project shows three sessions then pages five at a time',async()=>{
     const node={type:'project',data:{project,sessions},workspace:{id:'w'},project};
 
     let kids=await tree.getChildren(node);
-    assert.equal(kids.filter((k:any)=>k.type==='session').length,3,'mặc định 3 session');
+    assert.equal(kids.filter((k:any)=>k.type==='session').length,3,'3 sessions by default');
     const more=kids[kids.length-1];
     assert.equal(more.type,'more');
     assert.deepEqual({shown:more.data.shown,total:more.data.total},{shown:3,total:12});
 
     tree.showMore('p',12);
     kids=await tree.getChildren(node);
-    assert.equal(kids.filter((k:any)=>k.type==='session').length,8,'bấm More => +5');
+    assert.equal(kids.filter((k:any)=>k.type==='session').length,8,'clicking More => +5');
 
     tree.showMore('p',12);
     kids=await tree.getChildren(node);
     assert.equal(kids.filter((k:any)=>k.type==='session').length,12);
-    assert.equal(kids.some((k:any)=>k.type==='more'),false,'hết session thì bỏ nút More');
+    assert.equal(kids.some((k:any)=>k.type==='more'),false,'no more sessions drops the More button');
 
     tree.showMore('p',12);
     kids=await tree.getChildren(node);
-    assert.equal(kids.length,12,'không vượt quá tổng số');
+    assert.equal(kids.length,12,'never more than the total');
   }finally{Module._load=original;}
 });
 
@@ -92,20 +92,20 @@ test('root lists the workspaces then a Recent node capped at eight sessions, the
     const roots=await tree.getChildren();
     assert.equal(roots[0].type,'workspace');
     const recent=roots.find((r:any)=>r.type==='recent');
-    assert.ok(recent,'phải có node Recent');
-    assert.ok(roots.indexOf(recent)>roots.findIndex((r:any)=>r.type==='workspace'),'Recent nằm sau workspace');
-    assert.equal(recent.data.sessions.length,8,'giới hạn 8');
-    assert.equal(recent.data.sessions[0].nativeSessionId,'s0','session đang chạy lên đầu');
-    assert.equal(recent.data.sessions[1].nativeSessionId,'s24','còn lại theo updatedAt giảm dần');
+    assert.ok(recent,'must have a Recent node');
+    assert.ok(roots.indexOf(recent)>roots.findIndex((r:any)=>r.type==='workspace'),'Recent comes after the workspaces');
+    assert.equal(recent.data.sessions.length,8,'capped at 8');
+    assert.equal(recent.data.sessions[0].nativeSessionId,'s0','running sessions go first');
+    assert.equal(recent.data.sessions[1].nativeSessionId,'s24','the rest by updatedAt descending');
 
     const ports=roots.find((r:any)=>r.type==='ports');
-    assert.ok(ports,'phải có node Ports');
-    assert.ok(roots.indexOf(ports)>roots.indexOf(recent),'Ports nằm dưới Recent');
+    assert.ok(ports,'must have a Ports node');
+    assert.ok(roots.indexOf(ports)>roots.indexOf(recent),'Ports sits below Recent');
 
     const kids=await tree.getChildren(recent);
     assert.equal(kids.length,8);
     assert.ok(kids.every((k:any)=>k.type==='session'));
-    assert.equal(kids[0].project.name,'Proj','session trong Recent phải kèm project để biết thuộc đâu');
+    assert.equal(kids[0].project.name,'Proj','sessions in Recent must carry their project to show where they belong');
   }finally{Module._load=original;}
 });
 
@@ -117,7 +117,7 @@ test('Recent is omitted when there are no sessions at all',async()=>{
     const {DevHubTreeProvider}=require('../../src/devhub/views/devHubTreeProvider');
     const tree=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects:[]})},{list:async()=>[]});
     const roots=await tree.getChildren();
-    assert.equal(roots.some((r:any)=>r.type==='recent'),false,'không session thì không có Recent');
+    assert.equal(roots.some((r:any)=>r.type==='recent'),false,'no sessions means no Recent');
   }finally{Module._load=original;}
 });
 
@@ -130,33 +130,33 @@ test('Recent rows show only the cleaned title, the repo moves to the tooltip',as
     const tree=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects:[]})},{list:async()=>[]});
     const s=(title:string)=>({provider:'claude',nativeSessionId:'a',workspaceId:'w',projectId:'p',cwd:'/tmp',title,status:'imported',createdAt:1,updatedAt:1});
 
-    // Trong Recent: có project, không có workspace. Nhãn = emoji trạng thái + title (repo chỉ ở tooltip).
+    // In Recent: has project, no workspace. Label = status emoji + title (repo only in the tooltip).
     const recentRow=tree.getTreeItem({type:'session',data:s('alo'),project:{name:'my-project'}});
-    assert.equal(recentRow.label,'alo','Recent không còn tiền tố repo');
-    assert.equal(recentRow.description,undefined,'imported là hàng bình thường: không có chữ nào');
-    assert.ok(String(recentRow.tooltip).includes('my-project'),'repo vẫn có trong tooltip');
+    assert.equal(recentRow.label,'alo','Recent no longer has a repo prefix');
+    assert.equal(recentRow.description,undefined,'imported is a normal row: no words at all');
+    assert.ok(String(recentRow.tooltip).includes('my-project'),'the repo is still in the tooltip');
 
-    // Dưới project: không lặp lại tên project
+    // Under a project: don't repeat the project name
     const nested=tree.getTreeItem({type:'session',data:s('alo'),project:{name:'my-project'},workspace:{id:'w'}});
-    assert.equal(nested.label,'alo','dưới project cũng chỉ còn title');
-    assert.equal(nested.description,undefined,'repo đã là node cha nên description trống');
-    assert.ok(String(nested.tooltip).startsWith('Claude'),'provider chuyển vào tooltip');
+    assert.equal(nested.label,'alo','under a project it is also just the title');
+    assert.equal(nested.description,undefined,'the repo is already the parent node so description is empty');
+    assert.ok(String(nested.tooltip).startsWith('Claude'),'the provider moves into the tooltip');
 
-    // Title dính ký tự vẽ khung từ đoạn paste phải được dọn
+    // Box-drawing characters stuck in a title from a paste must be cleaned
     const messy=tree.getTreeItem({type:'session',data:s('games.code-workspace\n├── mong-giang-ho\n└── ascension-war'),project:{name:'p'},workspace:{id:'w'}});
-    assert.equal(/[├└─│`]/.test(String(messy.label)),false,'không còn ký tự vẽ khung: '+messy.label);
-    assert.equal(/\s{2,}|\n/.test(String(messy.label)),false,'không còn xuống dòng / khoảng trắng thừa');
-    // Recent dọn title y hệt — giờ nó nằm trong nhãn
+    assert.equal(/[├└─│`]/.test(String(messy.label)),false,'no box-drawing characters left: '+messy.label);
+    assert.equal(/\s{2,}|\n/.test(String(messy.label)),false,'no newlines / extra whitespace left');
+    // Recent cleans the title the same way — it now sits in the label
     const messyRecent=tree.getTreeItem({type:'session',data:s('a\n├── b'),project:{name:'p'}});
-    assert.equal(/[├└─│`]|\n/.test(String(messyRecent.label)),false,'nhãn cũng phải dọn: '+messyRecent.label);
+    assert.equal(/[├└─│`]|\n/.test(String(messyRecent.label)),false,'the label must be cleaned too: '+messyRecent.label);
 
-    // Title bị cắt trước khi vào nhãn; repo không còn trong nhãn
+    // The title is cut before going into the label; the repo is no longer in the label
     const long=tree.getTreeItem({type:'session',data:s('x'.repeat(200)),project:{name:'a-very-long-service-name'}});
-    assert.equal(String(long.label).includes('a-very-long'),false,'repo không vào nhãn: '+long.label);
-    assert.ok(String(long.label).length<100,'nhãn phải ngắn, đang '+String(long.label).length);
+    assert.equal(String(long.label).includes('a-very-long'),false,'the repo does not go into the label: '+long.label);
+    assert.ok(String(long.label).length<100,'the label must be short, currently '+String(long.label).length);
     const nestedLong=tree.getTreeItem({type:'session',data:s('x'.repeat(200)),project:{name:'p'},workspace:{id:'w'}});
-    assert.ok(String(nestedLong.label).length<100,'nhãn title phải ngắn, đang '+String(nestedLong.label).length);
-    assert.equal(/^Claude/.test(String(nestedLong.label)),false,'nhãn không được bắt đầu bằng tên provider');
+    assert.ok(String(nestedLong.label).length<100,'the title label must be short, currently '+String(nestedLong.label).length);
+    assert.equal(/^Claude/.test(String(nestedLong.label)),false,'the label must not start with the provider name');
   }finally{Module._load=original;}
 });
 
@@ -170,25 +170,25 @@ test('every row keeps its vendor logo and carries its status as an emoji in the 
     const s=(status:string)=>({provider:'claude',nativeSessionId:'a',workspaceId:'w',projectId:'p',cwd:'/tmp',title:'t',status,createdAt:1,updatedAt:1});
     const icon=(st:string)=>String(tree.getTreeItem({type:'session',data:s(st),project:{name:'p'},workspace:{id:'w'}}).iconPath?.id||'');
     for(const st of ['running','done','imported','failed'])
-      assert.equal(icon(st).includes('spin'),false,st+' không được quay');
-    // MỌI trạng thái giữ logo hãng — trạng thái đã nằm ở emoji nên không phải đánh đổi nữa.
-    // (mock không có MEDIA nên rơi về codicon của provider)
+      assert.equal(icon(st).includes('spin'),false,st+' must not spin');
+    // EVERY state keeps the brand logo — the state is in the emoji so there is no trade-off any more.
+    // (the mock has no MEDIA so it falls back to the provider codicon)
     for(const st of ['running','done','imported','failed','cancelled','unavailable'])
-      assert.equal(icon(st),'sparkle',st+' vẫn phải là logo hãng');
+      assert.equal(icon(st),'sparkle',st+' must still be the brand logo');
     const label=(st:string)=>String(tree.getTreeItem({type:'session',data:s(st),project:{name:'p'},workspace:{id:'w'}}).label||'');
     assert.ok(label('running').startsWith('\u23F3'),'running: '+label('running'));
     assert.ok(label('failed').startsWith('\u{1F534}'),'failed: '+label('failed'));
     assert.ok(label('done').startsWith('\u2705'),'done: '+label('done'));
-    // `imported` KHÔNG đội glyph: chỗ trống là thứ phân biệt nó với hàng đã chạy xong.
-    assert.equal(label('imported'),'t','imported là hàng Dev Hub chưa chạy lượt nào');
+    // `imported` carries NO glyph: the empty space is what tells it apart from a finished row.
+    assert.equal(label('imported'),'t','imported is a row Dev Hub has not run a turn on');
 
-    // badge gọn thay cho chữ "1 running"
+    // a compact badge instead of the words "1 running"
     const proj=tree.getTreeItem({type:'project',data:{project:{name:'x',id:'p'},sessions:[s('running'),s('done')]}});
     assert.equal(proj.description,'● 1','badge compact');
     const idle=tree.getTreeItem({type:'project',data:{project:{name:'x',id:'p'},sessions:[s('done')]}});
-    assert.equal(idle.description,undefined,'không chạy thì không badge');
+    assert.equal(idle.description,undefined,'not running means no badge');
 
-    // accent workspace phải ổn định, không đổi giữa các lần gọi
+    // the workspace accent must be stable, not change between calls
     assert.equal(workspaceAccent('Client Work'),workspaceAccent('Client Work'));
     assert.notEqual(workspaceAccent('Game'),workspaceAccent('Client Work'));
   }finally{Module._load=original;}
@@ -205,20 +205,20 @@ test('a New chat row closes the tree, and only when there is a project to chat a
     const withProjects=new DevHubTreeProvider(
       {snapshot:async()=>({workspaces:[{id:'w',name:'W',createdAt:1,updatedAt:1}],projects:[project]})},{list:async()=>[]});
     const roots=await withProjects.getChildren();
-    // Hai hàng hành động đóng cây, dưới Agents: tạo chat, rồi mở nó trên điện thoại.
-    assert.deepEqual(roots.slice(-2).map((n:any)=>n.type),['newchat','mobileapp'],'phải nằm CUỐI, dưới Agents');
+    // Two action rows close the tree, below Agents: create a chat, then open it on the phone.
+    assert.deepEqual(roots.slice(-2).map((n:any)=>n.type),['newchat','mobileapp'],'must be LAST, below Agents');
     const item=withProjects.getTreeItem(roots[roots.length-2]);
     assert.equal(item.label,'New chat…');
     assert.equal(item.command.command,'devhub.searchProject');
-    assert.equal(item.collapsibleState,0,'không được có mũi tên xổ');
+    assert.equal(item.collapsibleState,0,'must have no expand arrow');
     const phone=withProjects.getTreeItem(roots[roots.length-1]);
     assert.equal(phone.label,'Open on phone…');
     assert.equal(phone.command.command,'devhub.openMobileApp');
 
     const empty=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects:[]})},{list:async()=>[]});
     const bare=await empty.getChildren();
-    assert.equal(bare.some((n:any)=>n.type==='newchat'),false,'chưa có project thì đừng mời tạo chat');
-    // Hàng điện thoại KHÔNG phụ thuộc project: nó phục vụ cả cây, kể cả lúc chưa có gì.
+    assert.equal(bare.some((n:any)=>n.type==='newchat'),false,'no project yet means do not offer to create a chat');
+    // The phone row does NOT depend on projects: it serves the whole tree, even when there is nothing yet.
     assert.equal(bare.some((n:any)=>n.type==='mobileapp'),true);
   }finally{Module._load=original;}
 });
@@ -235,12 +235,12 @@ test('a row waiting for approval says so, even though the store still calls it r
     const row=(id:string)=>tree.getTreeItem({type:'session',workspace:{id:'w'},project:{name:'p'},
       data:{provider:'claude',nativeSessionId:id,workspaceId:'w',projectId:'p',cwd:'/tmp',title:'t',
             status:'running',createdAt:1,updatedAt:1}});
-    assert.ok(String(row('a').label).startsWith('\u2753'),'chờ duyệt: '+row('a').label);
+    assert.ok(String(row('a').label).startsWith('\u2753'),'awaiting approval: '+row('a').label);
     assert.ok(String(row('a').tooltip).includes('waiting for approval'));
-    // Cùng status `running`, khác chỗ: session không bị hỏi vẫn là 🟢.
-    assert.ok(String(row('b').label).startsWith('\u23F3'),'không bị hỏi: '+row('b').label);
+    // Same `running` status, different place: a session not being asked is still 🟢.
+    assert.ok(String(row('b').label).startsWith('\u23F3'),'not asked: '+row('b').label);
     assert.ok(!String(row('b').tooltip).includes('waiting'));
-    // Chờ duyệt thắng cả trạng thái bất thường — nó là hàng duy nhất cần tay người.
+    // Awaiting approval beats even abnormal states — it is the only row that needs a human hand.
     assert.equal(statusGlyph('failed',true),'\u2753');
     assert.equal(statusGlyph('failed',false),'\u{1F534}');
   }finally{Module._load=original;}
@@ -249,14 +249,14 @@ test('a row waiting for approval says so, even though the store still calls it r
 test('a session row shows its hand-set name over the first prompt, and spends words only on an abnormal status',()=>{
   const {sessionNote,sessionLabel}=require('../../src/devhub/views/devHubTreeProvider');
   assert.equal(sessionLabel({title:'fix the queue'}),'fix the queue');
-  // Đã rename thì tên đặt tay thắng; không còn tiền tố repo.
+  // Once renamed the hand-set name wins; no repo prefix any more.
   assert.equal(sessionLabel({title:'fix the queue',name:'Queue bug'}),'Queue bug');
-  // Recent đã xếp theo mới nhất nên thời gian là nhiễu; `imported` là mặc định — in ra chỉ là jargon.
+  // Recent is already sorted newest first so time is noise; `imported` is the default — printing it is just jargon.
   assert.equal(sessionNote('imported'),undefined);
-  // `running`/`done` KHÔNG thành chữ: ⏳/✅ trong nhãn đã nói điều đó.
+  // `running`/`done` do NOT become words: ⏳/✅ in the label already say it.
   assert.equal(sessionNote('running'),undefined);
   assert.equal(sessionNote('done'),undefined);
-  // failed/cancelled/unavailable không lộ ra chỗ nào khác: icon hàng không chạy là logo hãng.
+  // failed/cancelled/unavailable show nowhere else: the icon of a non-running row is the brand logo.
   assert.equal(sessionNote('failed'),'failed');
   assert.equal(sessionNote('cancelled'),'cancelled');
 });
@@ -285,7 +285,7 @@ test('an http agent lists its tasks over the API instead of reading SQLite',asyn
     const node={type:'agent',data:{spec,running:true,detail:'running'}};
 
     const kids=await tree.getChildren(node);
-    assert.deepEqual(kids.map((k:any)=>k.data.task.jira_key),['A-1','A-2'],'chờ duyệt lên trước');
+    assert.deepEqual(kids.map((k:any)=>k.data.task.jira_key),['A-1','A-2'],'awaiting approval goes first');
     assert.equal(plannerConversationId(kids[0].data.session.nativeSessionId),'task:A-1');
 
     const item=tree.getTreeItem(kids[0]);
@@ -294,7 +294,7 @@ test('an http agent lists its tasks over the API instead of reading SQLite',asyn
     assert.equal(item.command.command,'devhub.openPlannerSession');
 
     await tree.getChildren(node);
-    assert.equal(hits,1,'TTL cache: refresh cây không được bắn thêm request');
+    assert.equal(hits,1,'TTL cache: refreshing the tree must not fire extra requests');
   } finally {
     tree?.dispose?.();Module._load=original;await new Promise<void>(r=>server.close(()=>r()));
   }
@@ -308,11 +308,11 @@ test('an unreachable daemon says so instead of showing an empty inbox',async()=>
     delete require.cache[require.resolve('../../src/devhub/views/devHubTreeProvider')];
     const {DevHubTreeProvider}=require('../../src/devhub/views/devHubTreeProvider');
     tree=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects:[]})},{list:async()=>[]});
-    // Cổng 1 không ai nghe: một inbox rỗng và một daemon chết trông giống hệt nhau nếu im lặng.
+    // Nobody listens on port 1: an empty inbox and a dead daemon look identical if silent.
     const spec={name:'my-planner',cwd:'/tmp/my-planner',kind:'http',endpoint:'http://127.0.0.1:1'};
     const kids=await tree.getChildren({type:'agent',data:{spec,running:false,detail:''}});
     assert.equal(kids[0].type,'plannerOffline');
-    assert.ok(tree.getTreeItem(kids[0]).description,'phải nói lý do');
+    assert.ok(tree.getTreeItem(kids[0]).description,'must give the reason');
   } finally { tree?.dispose?.();Module._load=original; }
 });
 
@@ -333,7 +333,7 @@ test('a live daemon with nothing in the inbox says that, not nothing',async()=>{
     const spec={name:'my-planner',cwd:'/tmp/my-planner',kind:'http',endpoint};
     const kids=await tree.getChildren({type:'agent',data:{spec,running:true,detail:'running'}});
     assert.equal(kids.length,1);
-    assert.equal(kids[0].type,'plannerEmpty','inbox rỗng phải có hàng riêng, khác hẳn daemon chết');
+    assert.equal(kids[0].type,'plannerEmpty','an empty inbox must have its own row, clearly different from a dead daemon');
     assert.equal(tree.getTreeItem(kids[0]).description,endpoint);
   } finally {
     tree?.dispose?.();Module._load=original;await new Promise<void>(r=>server.close(()=>r()));
@@ -352,9 +352,9 @@ test('the free-chat row sits at the root so asking never needs a click into the 
     tree=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects:[]})},{list:async()=>[]});
     const roots=await tree.getChildren();
     const chat=roots.filter((n:any)=>n.type==='plannerChat');
-    assert.equal(chat.length,1,'chỉ bot kind:http mới có hàng hỏi');
+    assert.equal(chat.length,1,'only kind:http bots get an ask row');
     assert.equal(plannerConversationId(chat[0].data.session.nativeSessionId),'chat:my-planner');
-    // Đứng trước "Open on phone…" nhưng sau Agents: hàng hay dùng nhất không nằm cuối cùng.
+    // Before "Open on phone…" but after Agents: the most-used row isn't the very last one.
     assert.ok(roots.indexOf(chat[0])<roots.findIndex((n:any)=>n.type==='mobileapp'));
   } finally { tree?.dispose?.();Module._load=original; }
 });
@@ -367,22 +367,22 @@ test('Recent carries the RAM its live CLI processes are holding',async()=>{
     const {DevHubTreeProvider}=require('../../src/devhub/views/devHubTreeProvider');
     const node={type:'recent',data:{sessions:new Array(8),projects:[]}};
 
-    // Chưa đo xong: chỉ có số session, không bịa ra 0MB.
+    // Not measured yet: only the session count, no made-up 0MB.
     const tree=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects:[]})},{list:async()=>[]},undefined,undefined,()=>[]);
     let fires=0;Object.assign(tree,{emitter:{fire:()=>fires++}});
     assert.equal(tree.getTreeItem(node).description,'8');
     await new Promise(r=>setTimeout(r,0));
-    assert.equal(fires,1,'đo xong phải vẽ lại đúng một lần');
-    // Không pid nào sống thì không có `ps` nào chạy và không có số nào hiện.
+    assert.equal(fires,1,'once measured it must redraw exactly once');
+    // No live pid means no `ps` runs and no number shows.
     assert.equal(tree.getTreeItem(node).description,'8');
-    assert.equal(fires,1,'lần vẽ sau nằm trong TTL: không đo lại, không vòng lặp render');
+    assert.equal(fires,1,'the next draw is within TTL: no re-measure, no render loop');
 
     const hot=new DevHubTreeProvider({snapshot:async()=>({workspaces:[],projects:[]})},{list:async()=>[]},undefined,undefined,()=>[1]);
     Object.assign(hot,{memCache:{at:Date.now(),totalMB:744},portsCache:{at:Date.now(),groups:[]}});
     assert.equal(hot.getTreeItem(node).description,'8 · 744MB');
     assert.ok(String(hot.getTreeItem(node).tooltip).includes('744MB'));
-    // `refresh()` chạy mỗi lần status session đổi; nó xoá ports/tasks nhưng không được xoá
-    // cache RAM, nếu không mỗi delta của một lượt đang chạy là một lần `ps`.
+    // `refresh()` runs every time a session status changes; it clears ports/tasks but must not clear
+    // the RAM cache, or every delta of a running turn is one `ps`.
     hot.refresh();
     assert.equal(hot.getTreeItem(node).description,'8 · 744MB');
     assert.equal((hot as any).portsCache,undefined);

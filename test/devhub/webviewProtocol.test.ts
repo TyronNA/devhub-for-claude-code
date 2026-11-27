@@ -8,8 +8,8 @@ test('webview protocol accepts only bounded known message shapes',()=>{
   assert.equal(parseWebviewMessage({type:'openFile',path:'relative/file.ts'}),undefined);
   assert.equal(parseWebviewMessage({type:'future',x:1}),undefined);
   assert.deepEqual(parseWebviewMessage({type:'copySessionId'}),{type:'copySessionId'});
-  // `back` đi cùng nút `‹` đã bỏ: nhận lại là mở lại một lối vào không còn UI nào gọi.
+  // `back` went with the removed `‹` button: accepting it again reopens an entry no UI calls.
   assert.equal(parseWebviewMessage({type:'back'}),undefined);
-  // `viewport` đã bị bỏ cùng với tính năng tự đóng sidebar — không được lặng lẽ nhận lại.
+  // `viewport` was removed along with the sidebar auto-close feature — it must not be quietly accepted again.
   assert.equal(parseWebviewMessage({type:'viewport',phone:true}),undefined);
 });

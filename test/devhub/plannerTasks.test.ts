@@ -16,9 +16,9 @@ test('a task row keeps the daemon status verbatim and adds version + confidence'
 });
 
 test('only the states that need a human get their own context value',()=>{
-  // Menu Approve/Execute/Stop bám vào đây; trạng thái khác phải rơi về hàng trơn.
+  // The Approve/Execute/Stop menus hang off this; other states must fall back to a plain row.
   assert.equal(taskRow({jira_key:'A-1',status:'APPROVED'}).contextValue,'devhubPlannerTaskApproved');
-  // Stop chỉ có nghĩa khi có exec run thật; ANALYZING là brain turn của scheduler, không dừng được.
+  // Stop only means something with a real exec run; ANALYZING is the scheduler's brain turn and can't be stopped.
   assert.equal(taskRow({jira_key:'A-1',status:'IMPLEMENTING',current_run_id:7}).contextValue,'devhubPlannerTaskRunning');
   assert.equal(taskRow({jira_key:'A-1',status:'IMPLEMENTING'}).contextValue,'devhubPlannerTask');
   assert.equal(taskRow({jira_key:'A-1',status:'ANALYZING'}).contextValue,'devhubPlannerTask');
@@ -40,12 +40,12 @@ test('a task session is a conversation id the daemon already understands',()=>{
   assert.equal(s.title,'ABC-1 · ANALYZING — fix it');
   assert.equal(s.projectId,'p1');
   assert.equal(s.cwd,'/tmp/my-planner');
-  assert.equal(s.updatedAt,1_700_000_000_000,'epoch giây của daemon phải đổi sang ms');
+  assert.equal(s.updatedAt,1_700_000_000_000,'the daemon\'s epoch seconds must be converted to ms');
 });
 
 test('a running task is still stored as imported',()=>{
-  // `running` trong store làm statusbar đếm nó và recoverStaleSessions() sửa bậy lúc mở —
-  // trạng thái thật sống ở daemon, cây đọc từ /tasks.
+  // `running` in the store makes the status bar count it and recoverStaleSessions() wrongly fix it on open —
+  // the real state lives in the daemon, the tree reads it from /tasks.
   assert.equal(taskSession(spec,{jira_key:'A-1',status:'IMPLEMENTING'},projects).status,'imported');
 });
 
@@ -61,8 +61,8 @@ test('the free-chat row reuses one conversation id so the daemon keeps its cache
 });
 
 test('two http agents get two conversation ids, not one shared row',()=>{
-  // Store key là provider + nativeSessionId: id dùng chung khiến hàng của daemon thứ hai
-  // ghi đè `plannerEndpoint` của daemon thứ nhất.
+  // The store key is provider + nativeSessionId: a shared id lets the second daemon's row
+  // overwrite the first daemon's `plannerEndpoint`.
   const other={name:'other-planner',cwd:'/tmp/other',kind:'http' as const,endpoint:'http://127.0.0.1:9'};
   const a=chatSession(spec,projects),b=chatSession(other,projects);
   assert.notEqual(a.nativeSessionId,b.nativeSessionId);
@@ -83,5 +83,5 @@ test('kind and endpoint survive the settings normalizer',()=>{
   assert.equal(endpointOf(a),'http://127.0.0.1:9000');
   const [b]=normalizeAgents([{name:'other',cwd:'~/x'}]);
   assert.equal(isHttpAgent(b),false);
-  assert.equal(endpointOf(b),'http://127.0.0.1:7341','không khai endpoint thì về cổng mặc định');
+  assert.equal(endpointOf(b),'http://127.0.0.1:7341','no endpoint declared falls back to the default port');
 });

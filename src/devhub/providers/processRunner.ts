@@ -1,8 +1,8 @@
 const cp = require('node:child_process');
 const { EventEmitter } = require('node:events');
 
-/** `max>0`: hàng chờ chặn kích thước, drop dòng cũ nhất. Chỉ dùng cho stderr — nơi có
- *  thể không ai consume; stdout mất dòng là mất event nên luôn để không chặn. */
+/** `max>0`: a size-capped buffer that drops the oldest line. Only used for stderr — which may
+ *  have no consumer; losing a stdout line loses an event, so stdout is always unbounded. */
 class AsyncLineQueue {
   private values:string[]=[]; private waiters:any[]=[]; private done=false;
   constructor(private max=0){}
@@ -16,9 +16,9 @@ class AsyncLineQueue {
 const STDERR_MAX_LINES=500;
 
 /**
- * Con cháu của process CLI, theo ppid, sâu bao nhiêu cũng lấy.
- * Không dùng process group: Claude CLI chạy mỗi lệnh Bash trong group RIÊNG (đo được trên
- * 2.1.272 — pgid của zsh con khác hẳn pgid của claude), nên `kill(-pgid)` không với tới nó.
+ * Descendants of the CLI process, by ppid, at any depth.
+ * Process groups aren't used: Claude CLI runs each Bash command in its OWN group (measured on
+ * 2.1.272 — the child zsh's pgid differs from claude's), so `kill(-pgid)` doesn't reach it.
  */
 async function descendants(root:number):Promise<number[]>{
   const rows=await new Promise<string>(resolve=>{
@@ -37,9 +37,9 @@ async function descendants(root:number):Promise<number[]>{
 }
 
 /**
- * Giết cây con đã chụp TRƯỚC khi bố chết — bố chết rồi thì cháu về làm con của launchd và
- * không còn đường lần ra. TERM trước cho nó tự dọn, ai lì mới KILL.
- * Pid có thể đã được cấp lại cho process khác trong khoảng này; cửa sổ vài trăm ms nên chấp nhận.
+ * Kills the subtree captured BEFORE the parent dies — once the parent dies the grandchildren are reparented to launchd and
+ * can't be traced any more. TERM first so they clean up, KILL only the stubborn ones.
+ * A pid may have been reassigned to another process in between; the window is a few hundred ms, so that's accepted.
  */
 async function killTree(pids:number[]){
   if(!pids.length)return;
@@ -55,7 +55,7 @@ export interface SpawnedLineProcess { stdoutLines:AsyncIterable<string>; stderrL
 export interface DuplexProcess { stdoutLines:AsyncIterable<string>; stderrLines:AsyncIterable<string>; write(line:string):boolean; exit:Promise<{code:number|null;signal:any}>; cancel():Promise<void>; alive():boolean; pid?:number; }
 
 export class ProcessRunner {
-  /** stdin mở suốt vòng đời: dùng cho `--input-format stream-json`, một process nhiều lượt. */
+  /** stdin stays open for the whole lifetime: used for `--input-format stream-json`, one process for many turns. */
   spawnDuplex(options:SpawnLineOptions):DuplexProcess {
     const stdoutQ:any=new AsyncLineQueue(); const stderrQ:any=new AsyncLineQueue(STDERR_MAX_LINES);
     const child=cp.spawn(options.command,options.args,{cwd:options.cwd,env:options.env ?? process.env,stdio:['pipe','pipe','pipe'],signal:options.signal});
@@ -67,14 +67,14 @@ export class ProcessRunner {
       if(kind==='out')outBuf=remain; else errBuf=remain;
     };
     child.stdout?.on('data',(c:any)=>feed('out',c)); child.stderr?.on('data',(c:any)=>feed('err',c));
-    child.stdin?.on('error',()=>{}); // EPIPE khi process chết trước lúc ghi
+    child.stdin?.on('error',()=>{}); // EPIPE when the process dies before the write
     let closed=false;
     const exit=new Promise<{code:number|null;signal:any}>(resolve=>{
       child.once('error',()=>{closed=true;stdoutQ.close();stderrQ.close();resolve({code:null,signal:null});});
       child.once('close',(code:any,signal:any)=>{closed=true;if(outBuf)stdoutQ.push(outBuf);if(errBuf)stderrQ.push(errBuf);stdoutQ.close();stderrQ.close();resolve({code,signal});});
     });
     const cancel=async()=>{ if(closed)return;
-      // Chụp cây con trước mọi signal: SIGTERM cho mình bố không lan xuống lệnh nền nó đẻ ra.
+      // Capture the subtree before any signal: SIGTERM to the parent alone doesn't reach the background commands it spawned.
       const kids=child.pid?await descendants(child.pid):[];
       try{child.stdin?.end();}catch{} child.kill('SIGTERM');
       await Promise.race([exit,new Promise(r=>setTimeout(r,1200))]);
@@ -97,8 +97,8 @@ export class ProcessRunner {
       if(kind==='out') stdoutBuf=remain; else stderrBuf=remain;
     };
     child.stdout?.on('data',(c:any)=>feed('out',c)); child.stderr?.on('data',(c:any)=>feed('err',c));
-    // stdinText lớn hơn buffer pipe (64KB) mà CLI chết trước khi đọc: EPIPE không ai bắt ở đây
-    // là sập cả extension host, không chỉ lượt này.
+    // stdinText larger than the pipe buffer (64KB) with the CLI dying before reading: an EPIPE not caught here
+    // crashes the whole extension host, not just this turn.
     child.stdin?.on('error',()=>{});
     if(options.stdinText !== undefined){ child.stdin?.end(options.stdinText); }
     else child.stdin?.end();
@@ -113,8 +113,8 @@ export class ProcessRunner {
       await killTree(kids); };
     return {stdoutLines:stdoutQ, stderrLines:stderrQ, exit, cancel};
   }
-  /** Quá hạn = file có và đã chạy, chỉ chậm (binary ~300MB khởi động từ swap lúc máy tải
-   *  cao vượt 2.5s) — coi là có. Báo "not found" chỉ khi spawn lỗi hoặc exit khác 0. */
+  /** Timed out = the file exists and ran, just slowly (a ~300MB binary starting from swap under heavy load
+   *  exceeds 2.5s) — count it as present. Report "not found" only on a spawn error or a non-zero exit. */
   async isAvailable(command:string,timeoutMs=2500):Promise<boolean>{
     try { const h=this.spawnLines({command,args:['--version'],cwd:process.cwd()}); const r=await Promise.race([h.exit,new Promise<any>(resolve=>setTimeout(()=>resolve({code:999}),timeoutMs))]); if(r.code===999){ void h.cancel(); return true; } return r.code===0; } catch { return false; }
   }

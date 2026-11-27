@@ -4,7 +4,7 @@ import { DevHubSession } from '../types';
 import { compactNumber, providerLabel, usageParts } from '../ui/format';
 export class StatusBarController {
   private item:any;private account:any;private selected?:DevHubSession;
-  /** `accountOf` trả nhãn acc Claude của một cwd, `undefined` = chưa cấu hình acc phụ (ẩn nút). */
+  /** `accountOf` returns the Claude account label for a cwd, `undefined` = no second account configured (hide the button). */
   constructor(private store:SessionStore,private accountOf:(cwd:string)=>string|undefined=()=>undefined){this.item=vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right,80);this.item.command='devhub.openChat';this.account=vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right,79);}
   dispose(){this.item.dispose();this.account.dispose();}
   async setSelected(session?:DevHubSession){this.selected=session;await this.update();}

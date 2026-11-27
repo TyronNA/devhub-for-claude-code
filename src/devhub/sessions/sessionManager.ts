@@ -9,25 +9,25 @@ import { mergeSessionUsage } from '../usage/usageAggregator';
 export class SessionManager {
   private emitter=new EventEmitter(); private active=new Map<string,{handle:ProviderTurnHandle;task:Promise<void>;session:DevHubSession}>(); private tasks=new Set<Promise<void>>(); private cancelledHandles=new WeakSet<any>();
   /**
-   * `active` chỉ có mục sau khi provider.start/resume trả về — giữa lúc đó có nhiều `await`
-   * (isAvailable, spawn). Đếm suông trước các await đó cho phép N lượt cùng lọt qua cửa,
-   * nên phải GIỮ CHỖ trước và nhả trong finally.
+   * `active` only gets an entry after provider.start/resume returns — in between there are several `await`s
+   * (isAvailable, spawn). A plain count before those awaits lets N turns slip through at once,
+   * so a slot must be RESERVED first and released in finally.
    */
   private reserved=0;
-  /** Khoá theo session để hai lần resume không chồng lên cùng một thread. */
+  /** Lock per session so two resumes can't overlap on the same thread. */
   private claimed=new Set<string>();
   /**
-   * Session đang chạy một lượt KHÔNG do Dev Hub khởi: CLI tự mở lượt báo cáo sau khi một
-   * task nền xong. Không chiếm slot concurrent (ta không khởi nó, cũng không từ chối được),
-   * nhưng `isBusy` phải thấy — nếu không, lượt người dùng gửi lúc đó chồng lên nó.
+   * Sessions running a turn Dev Hub did NOT start: the CLI opens a report turn by itself after a
+   * background task finishes. It takes no concurrency slot (we didn't start it and can't refuse it),
+   * but `isBusy` must see it — otherwise a turn the user sends at that moment overlaps it.
    */
   private outOfTurn=new Set<string>();
-  /** Ghi store nối đuôi nhau: sink của pump gọi đồng bộ, hai lần ghi song song sẽ đè nhau. */
+  /** Store writes are chained: the pump's sink calls synchronously, and two parallel writes would clobber each other. */
   private outOfTurnWrites:Promise<any>=Promise.resolve();
   /**
-   * `active` PHẢI khoá theo provider nữa: native id không phải thứ độc quyền của một CLI —
-   * Claude và planner có thể mang cùng một chuỗi, và một map chỉ theo id thì lượt sau đè lượt
-   * trước, `runningCount()` đếm thiếu, còn `cancel()` huỷ nhầm session của provider khác.
+   * `active` MUST also be keyed by provider: a native id isn't exclusive to one CLI —
+   * Claude and the planner may carry the same string, and a map keyed only by id lets a later turn overwrite
+   * an earlier one, `runningCount()` undercounts, and `cancel()` cancels another provider's session.
    */
   private akey(provider:string,nativeId:string){return `${provider}\u0000${nativeId}`;}
   constructor(private store:SessionStore,private providers:Record<string,AgentProvider>,private maxConcurrent=4){}
@@ -37,22 +37,22 @@ export class SessionManager {
     this.reserved++;
   }
   /**
-   * `cancel()` ghi status 'cancelled' NGAY, còn `active` chỉ rỗng sau khi consume drain hết
-   * stream. Trong khoảng đó status nói rảnh mà `claim()` vẫn từ chối — ai đọc status để
-   * quyết định gửi lượt mới sẽ ăn lỗi. Hỏi cái này thay vì đoán qua status.
+   * `cancel()` writes status 'cancelled' IMMEDIATELY, while `active` only empties after consume drains the
+   * stream. In between, the status says idle but `claim()` still refuses — anyone reading the status to
+   * decide whether to send a new turn gets an error. Ask this instead of guessing from the status.
    */
   isBusy(provider:string,nativeId:string){return this.claimed.has(`${provider}:${nativeId}`)||this.active.has(this.akey(provider,nativeId))||this.outOfTurn.has(this.akey(provider,nativeId));}
   /**
-   * Sự kiện của một lượt CLI tự mở. Đi đúng đường emitter như lượt thường nên tab, cache và
-   * trang mobile vẽ tiếp mà không phải biết gì; chỉ trạng thái session là phải tự lật, vì
-   * `consume()` đã kết thúc từ lượt trước.
+   * Events of a CLI self-opened turn. They take the same emitter path as normal turns, so the tab, the cache and
+   * the mobile page keep drawing without knowing anything; only the session status must be flipped here, because
+   * `consume()` already finished with the previous turn.
    */
   ingestOutOfTurn(provider:ProviderId,nativeId:string,event:DevHubEvent){
     const key=this.akey(provider,nativeId);
     this.emitter.emit('event',{provider,sessionId:nativeId,event});
-    if(this.active.has(key))return;   // lượt thường vẫn đang chạy: status do consume() lo
-    // `usage` lẻ ngoài lượt (trả lời `get_usage` sau `result`) không mở lượt nào: coi nó là
-    // "bắt đầu" thì session bị lật sang running và kẹt đó vì chẳng có turn_done nào theo sau.
+    if(this.active.has(key))return;   // a normal turn is still running: consume() owns the status
+    // A stray `usage` outside a turn (the `get_usage` answer after `result`) opens no turn: treating it as
+    // a "start" would flip the session to running and leave it stuck there, since no turn_done follows.
     const began=!this.outOfTurn.has(key)&&event.type!=='usage';
     const ended=event.type==='turn_done'||event.type==='error';
     if(ended)this.outOfTurn.delete(key); else if(began)this.outOfTurn.add(key);
@@ -92,8 +92,8 @@ export class SessionManager {
   private consume(session:DevHubSession,handle:ProviderTurnHandle){ const initialId=session.nativeSessionId; const task=(async()=>{let current=session;let sawError=false;try{for await(const event of handle.events){ const native=handle.getNativeSessionId(); if(native&&native!==current.nativeSessionId){const old=current.nativeSessionId;await this.store.rekey(current.provider,old,native);current={...current,nativeSessionId:native};const runtime=this.active.get(this.akey(current.provider,old));this.active.delete(this.akey(current.provider,old));if(runtime)this.active.set(this.akey(current.provider,native),{...runtime,session:current});this.emitter.emit('sessionRekeyed',{provider:current.provider,oldId:old,newId:native,session:current});} let shouldPersist=false;if(event.type==='usage'){current={...current,usage:mergeSessionUsage(current.usage,event.usage),updatedAt:Date.now()};shouldPersist=true;} if(event.type==='error')sawError=true; this.emitter.emit('event',{provider:current.provider,sessionId:current.nativeSessionId,event}); if(shouldPersist)await this.store.upsert(current); } current={...current,status:this.cancelledHandles.has(handle)?'cancelled':(sawError?'failed':'done'),updatedAt:Date.now()};await this.store.upsert(current);this.emitter.emit('sessionUpdated',current);}catch(e:any){current={...current,status:this.cancelledHandles.has(handle)?'cancelled':'failed',updatedAt:Date.now()};await this.store.upsert(current);this.emitter.emit('event',{provider:current.provider,sessionId:current.nativeSessionId,event:{type:'error',message:String(e?.message||e),timestamp:Date.now()}});this.emitter.emit('sessionUpdated',current);}finally{this.active.delete(this.akey(current.provider,current.nativeSessionId));this.active.delete(this.akey(session.provider,initialId));}})(); this.active.set(this.akey(session.provider,initialId),{handle,task,session});this.tasks.add(task);task.finally(()=>this.tasks.delete(task)); }
 
   /**
-   * Picker đổi model/effort là đổi ngay cho session, kể cả khi chưa gửi lượt nào — đóng tab
-   * mở lại phải thấy đúng lựa chọn đó. Giữ nguyên `updatedAt` để cây không nhảy thứ tự.
+   * Changing model/effort in the picker changes it for the session right away, even before any turn — closing the tab
+   * and reopening must show that same choice. Keep `updatedAt` so the tree doesn't reorder.
    */
   async setTurnOptions(session:DevHubSession,opts:{model?:string;effort?:string}){
     const current=await this.store.get(session.provider,session.nativeSessionId)??session;
@@ -114,7 +114,7 @@ export class SessionManager {
     try{
       const recovered=await Promise.all(stale.map(async session=>{
         if(this.isBusy(session.provider,session.nativeSessionId))return undefined;
-        // Giữ claim tới sau lần ghi batch để resume không chen vào rồi bị recovery ghi đè.
+        // Hold the claim until after the batch write so a resume can't slip in and then be overwritten by recovery.
         locks.push(this.claim(session.provider,session.nativeSessionId));
         const provider=this.providers[session.provider];
         let status:DevHubSession['status']='imported';
@@ -122,7 +122,7 @@ export class SessionManager {
         else {
           try{
             const events=await provider.loadTranscript(session);
-            // Chỉ đọc sau tin cuối: turn_done của lượt trước không kết thúc lượt bị cắt.
+            // Only read after the last message: the previous turn's turn_done doesn't end the interrupted turn.
             let from=0;
             for(let i=events.length-1;i>=0;i--)if(events[i].type==='user_message'){from=i;break;}
             for(let i=events.length-1;i>=from;i--){
@@ -141,16 +141,16 @@ export class SessionManager {
 
   async cancel(provider:string,nativeId:string){ const a=this.active.get(this.akey(provider,nativeId));if(!a)return await this.cancelOutOfTurn(provider,nativeId);this.cancelledHandles.add(a.handle);await a.handle.cancel();const s={...a.session,status:'cancelled' as const,updatedAt:Date.now()};await this.store.upsert(s);this.emitter.emit('sessionUpdated',s); }
   /**
-   * Lượt CLI tự mở không nằm trong `active` — ta không khởi nó nên không giữ handle nào.
-   * Không có nhánh này thì `cancel()` return ngay và nút dừng trông y như hỏng: process vẫn
-   * chạy, tab vẫn quay. Provider giết process xong thì không còn event nào tới nữa (sink của
-   * pump gọi đồng bộ), nên ghi status ở đây là an toàn.
+   * A CLI self-opened turn isn't in `active` — we didn't start it so we hold no handle.
+   * Without this branch `cancel()` returns at once and the stop button looks broken: the process keeps
+   * running, the tab keeps spinning. Once the provider kills the process no more events arrive (the pump's sink
+   * calls synchronously), so writing the status here is safe.
    */
   private async cancelOutOfTurn(provider:string,nativeId:string){
     const key=this.akey(provider,nativeId); if(!this.outOfTurn.has(key))return;
     const p=this.providers[provider]; if(!p?.interruptOutOfTurn)return;
     await p.interruptOutOfTurn(nativeId); this.outOfTurn.delete(key);
-    // Nối đuôi hàng ghi của `ingestOutOfTurn`, nếu không 'running' của event chót đè 'cancelled'.
+    // Chain onto `ingestOutOfTurn`'s write queue, or the last event's 'running' overwrites 'cancelled'.
     this.outOfTurnWrites=this.outOfTurnWrites.then(async()=>{
       const cur=await this.store.get(provider as ProviderId,nativeId); if(!cur)return;
       const next={...cur,status:'cancelled' as const,updatedAt:Date.now()};
