@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 import { discoverClaudeHistory, loadClaudeTranscript } from '../../src/devhub/providers/claude/claudeHistory';
+import { discoverCodexHistory } from '../../src/devhub/providers/codex/codexHistory';
 import { projectForCwd } from '../../src/devhub/providers/historyUtils';
 
 function project(root:string){ return {id:'p',workspaceId:'w',name:'repo',rootPath:root,createdAt:1,updatedAt:1}; }
@@ -20,7 +21,19 @@ test('claude history maps transcript cwd to registered project', async () => {
   assert.equal(sessions.length,1); assert.equal(sessions[0].nativeSessionId,'abc'); assert.match(sessions[0].title,/Improve battle feel/);
 });
 
-test('history discovery builds an O(1) transcript path index for Claude', async () => {
+test('codex history maps session_meta cwd to registered project', async () => {
+  const home=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-codex-'));
+  const repo=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-repo-'));
+  const dir=path.join(home,'sessions','2026','09','01'); await fs.mkdir(dir,{recursive:true});
+  await fs.writeFile(path.join(dir,'rollout-x.jsonl'), [
+    JSON.stringify({type:'session_meta',payload:{id:'thread-1',cwd:repo},timestamp:'2026-09-01T10:00:00Z'}),
+    JSON.stringify({type:'event_msg',payload:{type:'user_message',message:'Fix projectile'},timestamp:'2026-09-01T10:00:01Z'})
+  ].join('\n'));
+  const sessions=await discoverCodexHistory([project(repo) as any], home, 100);
+  assert.equal(sessions.length,1); assert.equal(sessions[0].nativeSessionId,'thread-1'); assert.match(sessions[0].title,/Fix projectile/);
+});
+
+test('history discovery builds an O(1) transcript path index for Claude and Codex', async () => {
   const repo=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-repo-index-'));
   const claudeHome=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-claude-index-'));
   const claudeDir=path.join(claudeHome,'projects','encoded'); await fs.mkdir(claudeDir,{recursive:true});
@@ -32,6 +45,17 @@ test('history discovery builds an O(1) transcript path index for Claude', async 
   const claudeIndex=new Map<string,string>();
   await discoverClaudeHistory([project(repo) as any], claudeHome, 100, claudeIndex);
   assert.equal(claudeIndex.get('claude-id'), claudeFile);
+
+  const codexHome=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-codex-index-'));
+  const codexDir=path.join(codexHome,'sessions','2026','09','01'); await fs.mkdir(codexDir,{recursive:true});
+  const codexFile=path.join(codexDir,'rollout-x.jsonl');
+  await fs.writeFile(codexFile, [
+    JSON.stringify({type:'session_meta',payload:{id:'codex-id',cwd:repo},timestamp:'2026-09-01T10:00:00Z'}),
+    JSON.stringify({type:'event_msg',payload:{type:'user_message',message:'hello'},timestamp:'2026-09-01T10:00:01Z'})
+  ].join('\n'));
+  const codexIndex=new Map<string,string>();
+  await discoverCodexHistory([project(repo) as any], codexHome, 100, codexIndex);
+  assert.equal(codexIndex.get('codex-id'), codexFile);
 });
 
 /** Reading from the start of the file loses exactly the newest part of a chat over 16 MiB — what the user is looking at. */

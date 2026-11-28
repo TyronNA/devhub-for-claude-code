@@ -16,9 +16,7 @@ export class SessionStore {
     if(this.data) return this.data;
     if(!this.loading){
       this.loading=readJson<SessionStoreFile>(this.file,{version:1,sessions:[]}).then(data=>{
-        // Codex was removed (0.29.72): old records have no provider to open them and would only be dead rows
-        // in the tree. The next write removes them from the file; the original history in ~/.codex is untouched.
-        data.sessions=data.sessions.filter(s=>s.provider==='claude'||s.provider==='planner').map(scopedPlannerSession);
+        data.sessions=data.sessions.map(scopedPlannerSession);
         this.data=data;
         this.loading=undefined;
         return data;

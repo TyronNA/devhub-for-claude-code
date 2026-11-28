@@ -119,7 +119,7 @@ for(const r of rows){
   if(r.tokens)bits.push(`${(r.tokens/1000).toFixed(0)}k tok`);
   console.log(`    ${bits.join(' · ')}`);
   for(const s of (r.forked?[]:r.spawned))
-    console.log(`    sub-agent ${r.finished.has(s.thread)?'✓':'✗ KHÔNG BÁO XONG'}  ${s.path||s.thread}${s.thread&&s.path?`  ${s.thread}`:''}`);
+    console.log(`    sub-agent ${r.finished.has(s.thread)?'✓':'✗ NEVER REPORTED DONE'}  ${s.path||s.thread}${s.thread&&s.path?`  ${s.thread}`:''}`);
 }
 console.log(`\n${flagged}/${rows.length} sessions show signs worth a look (rows marked \`!\`).`);
 }

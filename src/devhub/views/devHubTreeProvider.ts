@@ -65,8 +65,9 @@ export function setMediaRoot(dir:string){MEDIA=dir;}
 function providerIcon(provider:string){
   // The planner has no vendor mark to borrow; it is a self-hosted daemon.
   if(provider==='planner')return new vscode.ThemeIcon('robot');
-  if(!MEDIA)return new vscode.ThemeIcon('sparkle');
-  return {light:vscode.Uri.file(nodePath.join(MEDIA,'claude-light.svg')),dark:vscode.Uri.file(nodePath.join(MEDIA,'claude-dark.svg'))};
+  if(!MEDIA)return new vscode.ThemeIcon(provider==='claude'?'sparkle':'rocket');
+  const base=provider==='claude'?'claude':'codex';
+  return {light:vscode.Uri.file(nodePath.join(MEDIA,`${base}-light.svg`)),dark:vscode.Uri.file(nodePath.join(MEDIA,`${base}-dark.svg`))};
 }
 export class DevHubTreeProvider {
   private emitter=new vscode.EventEmitter(); readonly onDidChangeTreeData=this.emitter.event;
@@ -95,8 +96,8 @@ export class DevHubTreeProvider {
               /** A pending approval request is LIVE state, not in the store — ask the panel
                *  and the mobile page while drawing instead of consulting a copy that drifts. */
               private awaiting?:(provider:string,sessionId:string)=>boolean,
-              /** pids of every live CLI. Only Claude keeps a process after a turn; the planner is HTTP
-               *  so it contributes nothing. */
+              /** pids of every live CLI. Only Claude keeps a process after a turn; Codex spawns per turn and
+               *  the planner is HTTP, so neither contributes. */
               private livePids?:()=>number[]){
     for(const p of pinStore?.get?.()??[])if(Number.isInteger(p))this.pins.add(p);
   }

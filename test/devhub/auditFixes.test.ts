@@ -5,6 +5,8 @@ import { SessionStore } from '../../src/devhub/storage/sessionStore';
 import { plannerSessionId, plannerConversationId } from '../../src/devhub/sessions/plannerIdentity';
 import { taskSession } from '../../src/devhub/agents/plannerTasks';
 import { PlannerProvider } from '../../src/devhub/providers/planner/plannerProvider';
+import { parseCodexHistoryRecord, codexSnapshot } from '../../src/devhub/providers/codex/codexHistoryParser';
+import { loadCodexContext } from '../../src/devhub/providers/codex/codexHistory';
 
 const session=(id:string,provider='claude'):any=>({provider,nativeSessionId:id,workspaceId:'w',projectId:'p',cwd:'/tmp',title:id,status:'running',createdAt:1,updatedAt:1});
 async function tempStore(){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-audit-fix-'));return {dir,store:new SessionStore(dir)};}
@@ -59,6 +61,29 @@ test('scoped planner turns and history send only the native conversation to the 
   assert.deepEqual(ids,['task:DEV-1','task:DEV-1']);
   assert.equal(h.getNativeSessionId(),s.nativeSessionId);
   assert.equal(plannerConversationId(s.nativeSessionId),'task:DEV-1');
+});
+
+const record=(primary:any,secondary:any,info:any=null):any=>({type:'event_msg',timestamp:'2026-09-09T01:00:00Z',payload:{type:'token_count',info,rate_limits:{limit_id:'codex',primary,secondary}}});
+test('Codex quota uses actual window durations and retains observation time without inventing absent values',()=>{
+  const usage=codexSnapshot(parseCodexHistoryRecord(record(
+    {used_percent:35,window_minutes:10080,resets_at:1789445836},
+    {used_percent:0,window_minutes:300,resets_at:1788952707})));
+  assert.equal(usage.quota5hUsedPercentage,0);assert.equal(usage.quota7dUsedPercentage,35);
+  assert.equal(usage.quota5hResetsAt,1788952707000);
+  assert.equal(usage.quota7dObservedAt,Date.parse('2026-09-09T01:00:00Z'));
+  assert.equal(usage.contextUsedTokens,undefined);
+  assert.deepEqual(codexSnapshot(parseCodexHistoryRecord(record({used_percent:25,window_minutes:15},{used_percent:null,window_minutes:300}))),{});
+  const foreign=record({used_percent:25,window_minutes:300},null);foreign.payload.rate_limits.limit_id='other';
+  assert.deepEqual(codexSnapshot(parseCodexHistoryRecord(foreign)),{});
+});
+
+test('Codex tail combines latest context with a later quota-only record and excludes billing totals',async()=>{
+  const {dir}=await tempStore();const file=path.join(dir,'rollout.jsonl');
+  const context=record(null,null,{last_token_usage:{total_tokens:123},total_token_usage:{total_tokens:999999},model_context_window:258400});
+  await fs.writeFile(file,[context,record({used_percent:27,window_minutes:300},null)].map(r=>JSON.stringify(r)).join('\n'));
+  const u=await loadCodexContext(file);
+  assert.equal(u!.contextUsedTokens,123);assert.equal(u!.quota5hUsedPercentage,27);
+  assert.equal(u!.inputTokens,undefined);
 });
 
 test('row refresh keeps port and task results until explicit invalidation',()=>{

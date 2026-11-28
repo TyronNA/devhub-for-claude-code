@@ -9,7 +9,7 @@ import { ClaudeSession, PermissionRequest, PermissionDecision } from './claudeSe
 import { isUnder } from './claudeAccount';
 
 /** Claude has no `--image` flag for stream-json; it reads files with the Read tool, so a path
- *  sent along with the prompt is the workable way to attach an image. */
+ *  sent along with the prompt is the workable way to attach an image. (Codex uses `-i`.) */
 export function withImages(prompt:string,images?:string[]){
   return images&&images.length?[...images,prompt].filter(Boolean).join('\n'):prompt;
 }

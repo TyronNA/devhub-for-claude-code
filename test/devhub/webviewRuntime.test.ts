@@ -340,7 +340,7 @@ test('every ring measures what is LEFT, and the quota rings vanish for a provide
   assert.equal(w.byId.ctxtext.textContent,'90%');
   assert.equal(w.timers.some((t:any)=>t.ms===60000),true,'still keeps the clock for the ~ mark and countdown');
 
-  w.post({type:'sessionSelected',session:{provider:'planner',nativeSessionId:'b',status:'done',usage:{}},
+  w.post({type:'sessionSelected',session:{provider:'codex',nativeSessionId:'b',status:'done',usage:{}},
     events:[],workspace:{name:'W'},project:{name:'P'}});
   assert.equal(w.byId.q5wrap.hidden,true,'a session without quota — fully hidden, no "5h —"');
   assert.equal(w.byId.q7wrap.hidden,true);
@@ -808,9 +808,9 @@ test('a planner view frame redraws one bubble instead of appending three',()=>{
   assert.deepEqual(w.warnings,[],'there must be no warnings: '+w.warnings.join(' | '));
 });
 
-test('recorded quota renders both rings and an old observation stays marked stale',()=>{
+test('Codex recorded quota renders both rings and an old observation stays marked stale',()=>{
   const w=boot();
-  w.post({type:'sessionSelected',session:{provider:'claude',nativeSessionId:'a',status:'done',usage:{
+  w.post({type:'sessionSelected',session:{provider:'codex',nativeSessionId:'a',status:'done',usage:{
     quota5hUsedPercentage:27,quota5hObservedAt:1,quota7dUsedPercentage:35,quota7dObservedAt:1,
     contextUsedTokens:123,contextWindowTokens:1000}},events:[]});
   assert.equal(w.document.getElementById('q5wrap').hidden,false);

@@ -1,3 +1,4 @@
+import { codexSnapshot } from '../providers/codex/codexHistoryParser';
 const vscode:any=require('vscode');
 const crypto=require('node:crypto');
 const fsp=require('node:fs/promises');
@@ -7,12 +8,15 @@ import { DevHubEvent, DevHubProject, DevHubSession, DevHubWorkspace, ProviderId 
 import { SessionManager } from '../sessions/sessionManager';
 import { AgentProvider } from '../providers/provider';
 import { coalesceSessionDeltas, EventBatcher } from '../ui/eventBatcher';
+import { codexImageRoot } from '../providers/codex/codexEventParser';
 import { recoverImages } from '../providers/claude/claudeProvider';
 import { parseWebviewMessage } from './webviewProtocol';
 import { localMediaRoots } from './localMedia';
 import { plannerConversationId } from '../sessions/plannerIdentity';
 import { SessionEventCache } from '../sessions/sessionEventCache';
 import { mergeTranscript, rereadsTranscript } from '../sessions/transcriptMerge';
+import { codexCatalog, codexEfforts } from '../providers/codex/codexCatalog';
+import { codexHistorySnapshot } from '../providers/codex/codexHistoryParser';
 import { QueueStore } from '../storage/queueStore';
 import { providerLabel } from '../ui/format';
 import { GitStatusWatcher } from '../workspace/gitStatusWatcher';
@@ -32,23 +36,29 @@ const HOT_SCM_MS=2000;
 // A question blocks the whole turn and must wait for a real person; the 5 minutes of a tool approval is too short.
 const ASK_TIMEOUT_MS=60*60*1000;
 // Effort is a fixed CLI flag so it stays in code; the MODEL list lives in settings because it keeps changing.
-const EFFORTS:Record<string,string[]>={claude:['low','medium','high','xhigh','max']};
+// Codex's fallback when `codex debug models` can't run; the live catalog is the real source.
+const EFFORTS:Record<string,string[]>={claude:['low','medium','high','xhigh','max'],codex:['none','minimal','low','medium','high','xhigh','max','ultra']};
 function cfg(){return vscode.workspace.getConfiguration('devHub');}
 function modelChoices(provider:string):string[]{const v=cfg().get(`${provider}.models`,[]);return Array.isArray(v)?v.filter((x:any)=>typeof x==='string'):[];}
 function defaultsFor(provider:string){return {model:cfg().get(`${provider}.model`,'')||undefined,effort:cfg().get(`${provider}.effort`,'')||undefined};}
 const EXT:Record<string,string>={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp'};
 
 /**
- * A provider's model/effort choices. Exported because the mobile server builds this exact list
+ * A provider's model/effort choices. Codex publishes a real catalog (with per-model effort levels),
+ * so it wins over settings. Exported because the mobile server builds this exact list
  * too — two places computing it themselves are two places that drift apart.
  */
 export function optionChoices(provider:string,kind:'model'|'effort',model?:string):Array<{label:string;description?:string;value:string}>{
-  const list=kind==='model'?modelChoices(provider):(EFFORTS[provider]||[]);
+  if(provider==='codex'&&kind==='model'&&codexCatalog().length)
+    return codexCatalog().map(m=>({label:m.label,description:m.slug,value:m.slug}));
+  const list=provider==='codex'&&kind==='effort'&&codexEfforts(model).length
+    ? codexEfforts(model)
+    : (kind==='model'?modelChoices(provider):(EFFORTS[provider]||[]));
   return list.map((v:string)=>({label:v,value:v}));
 }
 /**
  * Attached images may only live in the folder Dev Hub writes itself. `attachments` are paths
- * sent up by the client that go straight into the prompt (appended to Claude's prompt), so a
+ * sent up by the client that go straight into the prompt (Codex's `-i`, appended to Claude's prompt), so a
  * broken client could point at any file. Returns the first bad path, undefined if clean.
  */
 export function foreignAttachment(paths:string[]|undefined,dir:string):string|undefined{
@@ -158,7 +168,7 @@ export class ChatPanelProvider {
     const workspace=snap.workspaces.find(w=>w.id===d.workspaceId);
     const project=snap.projects.find(p=>p.id===d.projectId);
     if(!workspace||!project){panel.dispose();return;}
-    const providerId='claude' as ProviderId;
+    const providerId=(d.provider==='codex'?'codex':'claude') as ProviderId;
     const draft:Draft={workspace,project,provider:providerId};
     const def=defaultsFor(providerId);
     const tab=this.attach(`draft:${crypto.randomUUID()}`,panel,{draft,workspace,project,
@@ -228,6 +238,15 @@ export class ChatPanelProvider {
       }
     }
     if(tab.disposed)return;
+    if(session.provider==='codex'){
+      const usage=codexSnapshot(events||[]);
+      if(Object.entries(usage).some(([key,value])=>value!==(tab.session?.usage as any)?.[key]))
+        tab.session=await this.manager.updateUsage(tab.session!,usage);
+      if(tab.disposed)return;
+      if(!(this.manager.isBusy?.(session.provider,session.nativeSessionId)??false)&&this.manager.restoreHistoricalUsage)
+        tab.session=await this.manager.restoreHistoricalUsage(tab.session!,codexHistorySnapshot(events||[]));
+      if(tab.disposed)return;
+    }
     if(tab.disposed)return;
     this.postSessionSelected(tab,tab.session!,events);
     this.postOptions(tab);
@@ -250,8 +269,8 @@ export class ChatPanelProvider {
     this.column=panel.viewColumn??(typeof column==='number'?column:this.column);
     return this.attach(key,panel,init);
   }
-  /** Images the user attached and media the agent mentions (`localMediaRoots`). */
-  private imageRoots(){return [this.attachmentDir(),...localMediaRoots()].map(p=>vscode.Uri.file(p));}
+  /** Images Codex generates, images the user attached, and media the agent mentions (`localMediaRoots`). */
+  private imageRoots(){return [codexImageRoot(),this.attachmentDir(),...localMediaRoots()].map(p=>vscode.Uri.file(p));}
   /** The webview can't call `asWebviewUri` itself; give it the `/` base so it can join absolute paths onto it. */
   private postMediaBase(tab:Tab){try{this.post(tab,{type:'mediaBase',base:String(tab.panel.webview.asWebviewUri(vscode.Uri.file('/'))).replace(/\/$/,'')});}catch{}}
   private attach(key:string,panel:any,init:Partial<Tab>):Tab{
@@ -272,7 +291,7 @@ export class ChatPanelProvider {
     // The logo goes on the tab instead of a "Claude ·" prefix.
     if(this.providerOf(tab)==='planner'){tab.panel.iconPath=new vscode.ThemeIcon('robot');return;}
     if(this.mediaRoot){
-      const base='claude';
+      const base=this.providerOf(tab)==='codex'?'codex':'claude';
       tab.panel.iconPath={light:vscode.Uri.file(nodePath.join(this.mediaRoot,`${base}-light.svg`)),
                           dark:vscode.Uri.file(nodePath.join(this.mediaRoot,`${base}-dark.svg`))};
     }
@@ -370,7 +389,8 @@ export class ChatPanelProvider {
   }
 
   /**
-   * Claude compacts with the CLI's real slash command; the planner is an HTTP daemon with no notion of compaction.
+   * Claude compacts with the CLI's real slash command. Codex has none, so it calls `thread/compact/start` over
+   * the app-server — sending the text "/compact" to Codex is just a prompt. The planner has no notion of compaction.
    */
   private async compact(tab:Tab){
     const session=tab.session;
@@ -381,7 +401,25 @@ export class ChatPanelProvider {
       this.lastSelected=tab.session;this.onSelection(tab.session);
       return;
     }
-    this.post(tab,{type:'error',message:`${providerLabel(session.provider)} sessions have no compaction.`});
+    // Anything but Codex must NOT fall into the Codex adapter: the planner is an HTTP daemon,
+    // context compaction is a CLI concept, and calling codex.compact with its session is plainly wrong.
+    if(session.provider!=='codex'){this.post(tab,{type:'error',message:`${providerLabel(session.provider)} sessions have no compaction.`});return;}
+    const adapter:any=this.providers.codex;
+    if(!adapter?.compact){this.post(tab,{type:'error',message:'Codex compaction is unavailable in this build.'});return;}
+    const emit=(event:DevHubEvent)=>{
+      this.buffers.append(this.sessionKey('codex',session.nativeSessionId),event);
+      this.post(tab,{type:'event',sessionId:session.nativeSessionId,event});
+      if(event.type==='usage')this.onUsageChanged();
+    };
+    try{ await this.manager.withSessionLock(session,async()=>{
+      let usage: any;
+      await adapter.compact(session,(event:DevHubEvent)=>{
+        if(event.type==='usage')usage={...usage,...event.usage};
+        else emit(event);
+      });
+      if(usage){await this.manager.updateUsage(session,usage);this.onUsageChanged();}
+    }); }
+    catch(e:any){ emit({type:'error',message:`Compact failed: ${e?.message||e}`,timestamp:Date.now()}); }
   }
 
   /** `showTextDocument` opens a PNG as garbage characters; images must go through `vscode.open`. */
@@ -426,7 +464,7 @@ export class ChatPanelProvider {
     const provider=this.providerOf(tab);
     let items:any[]=optionChoices(provider,kind,tab.model);
     items=[{label:'Default',value:undefined as any},...items,{label:'Custom\u2026',value:'__custom__'}];
-    const pick=await vscode.window.showQuickPick(items,{placeHolder:`${providerLabel(provider)} ${kind}`});
+    const pick=await vscode.window.showQuickPick(items,{placeHolder:`${provider==='codex'?'Codex':'Claude'} ${kind}`});
     if(!pick)return;
     let value=pick.value;
     if(value==='__custom__'){value=await vscode.window.showInputBox({prompt:`${kind} value`,value:tab[kind]});if(value===undefined)return;value=value.trim()||undefined;}
@@ -440,7 +478,7 @@ export class ChatPanelProvider {
 
   /** Changing provider/project on a session that already ran opens a new draft — the old session's history isn't edited. */
   private async changeProvider(tab:Tab){
-    const pick=await vscode.window.showQuickPick([{label:'Claude',id:'claude'}],{placeHolder:'Provider'});
+    const pick=await vscode.window.showQuickPick([{label:'Claude',id:'claude'},{label:'Codex',id:'codex'}],{placeHolder:'Provider'});
     if(!pick)return;
     if(tab.draft){tab.draft={...tab.draft,provider:pick.id as ProviderId};const d=defaultsFor(pick.id);tab.model=d.model;tab.effort=d.effort;
       this.retitle(tab);this.post(tab,{type:'draftSelected',draft:tab.draft,events:[]});this.postOptions(tab);this.refreshScm(tab);return;}
@@ -510,7 +548,7 @@ export class ChatPanelProvider {
     await fsp.mkdir(dir,{recursive:true});
     const file=nodePath.join(dir,`${Date.now()}-${crypto.randomUUID().slice(0,8)}.${EXT[mime]||'png'}`);
     await fsp.writeFile(file,Buffer.from(b64,'base64'));
-    // The path goes back to the webview, then travels with sendPrompt.attachments.
+    // The path goes back to the webview, then travels with sendPrompt.attachments — Codex takes it via `-i`.
     this.post(tab,{type:'attachment',path:file,...(requestId?{requestId}:{})});
   }
   private async pruneAttachments(){
@@ -524,12 +562,12 @@ export class ChatPanelProvider {
   }
 
   /**
-   * Images travel in events as PATHS, not 1.7MB of base64: the host cache and
+   * Images (Codex's, attached ones) travel in events as PATHS, not 1.7MB of base64: the host cache and
    * the webview's `state.events` keep short strings. Only when sending are they turned into webview URIs, because
    * only the host can call `asWebviewUri` (and each tab has its own origin).
    */
   private forWebview(tab:Tab,event:any){
-    // A data URI has no file to turn into a URI.
+    // Images pasted into a Codex rollout only exist as data URIs — no file to turn into a URI.
     const uri=(p:string)=>p.startsWith('data:')?p:String(tab.panel.webview.asWebviewUri(vscode.Uri.file(p)));
     try{
       if(event?.type==='assistant_image'&&event.path)return {...event,src:uri(event.path)};
@@ -623,7 +661,7 @@ export class ChatPanelProvider {
   private postOptions(tab:Tab){
     const provider=this.providerOf(tab);
     const adapter:any=this.providers[provider];
-    // A provider without slash commands (planner) — hide the button instead of reporting an error on every click.
+    // A provider without slash commands (Codex publishes none, the planner has none) — hide the button instead of reporting an error on every click.
     const slash=(adapter?.slashCommands?.(tab.session?.nativeSessionId)||[]).length>0;
     this.post(tab,{type:'optionsChanged',model:tab.model,effort:tab.effort,provider,slash});}
   /** A permission request from the CLI -> the tab of that exact session. */
@@ -756,14 +794,14 @@ export class ChatPanelProvider {
 }
 
 /**
- * CSP is `default-src 'none'`, and `localResourceRoots` only opens the media roots (attached
+ * CSP is `default-src 'none'`, and `localResourceRoots` only opens the media roots (Codex images, attached
  * images, `~` and tmp for media the agent mentions) —
  * css/js still have to be read by the host and inlined into the HTML. Paths are computed from `__dirname`
  * (`dist/src/devhub/views` -> the extension root) so they are right both from the repo and inside the .vsix.
  */
 /** The chat page body. Shared by the webview panel and the mobile server — two transports,
  *  one set of ids: `chat.js` looks them up with getElementById, and one mismatched id fails silently. */
-export function chatBodyMarkup(){return `<header><div class="left"><button id="provider" class="chip" title="Change provider">Dev Hub</button><button id="crumb" class="chip ghost" title="Search project">—</button><span id="branch" class="chip ghost" hidden></span><button id="scm" class="chip ghost" title="Uncommitted changes" hidden></button></div><div class="right"><button id="copyid" class="chip ghost" title="Copy session ID" hidden>ID</button><button id="history" class="chip ghost" title="Open an earlier session in this project">\u{1F553}</button><span id="status"></span><button id="newtab" class="chip ghost" title="New chat in this project">+</button></div></header><main id="messages"><div class="empty">Select a session or start a new Claude chat.</div></main><footer><div id="thinking" hidden><span id="spinner"></span><span id="thinkword">Cooking</span><span id="thinktime"></span><span id="thinktokens"></span><button id="cancel" title="Stop this turn">Stop</button></div><div class="composer-box"><div id="queue"></div><div id="attachments"></div><textarea id="input" rows="3" placeholder="Ask Claude…"></textarea><div class="composerbar"><button id="attach" class="chip ghost" title="Attach an image">\u{1F4CE}</button><input id="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden><button id="slash" class="chip ghost" title="Slash command">/</button><button id="model" class="chip ghost" title="Model">auto</button><button id="effort" class="chip ghost" title="Thinking effort">auto</button><span id="cachewrap" class="quota" hidden><span id="cachelab" class="qlab">cache</span><span id="cachetext"></span><span id="cachetip" class="qtip" role="tooltip"></span></span><span class="spacer"></span><span id="q5wrap" class="quota" hidden><svg width="18" height="18" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="q5arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="q5lab" class="qlab"></span><span id="q5text"></span><span id="q5tip" class="qtip" role="tooltip"></span></span><span id="q7wrap" class="quota" hidden><svg width="18" height="18" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="q7arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="q7lab" class="qlab"></span><span id="q7text"></span><span id="q7tip" class="qtip" role="tooltip"></span></span><button id="ctxwrap" title="Context left \u2014 click to compact"><svg id="donut" width="22" height="22" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="ctxtext">—</span><span id="ctxtokens"></span><span id="ctxtip" class="qtip" role="tooltip"></span></span><button id="send" title="Send (⏎)">↑</button></div></div></footer>`;}
+export function chatBodyMarkup(){return `<header><div class="left"><button id="provider" class="chip" title="Change provider">Dev Hub</button><button id="crumb" class="chip ghost" title="Search project">—</button><span id="branch" class="chip ghost" hidden></span><button id="scm" class="chip ghost" title="Uncommitted changes" hidden></button></div><div class="right"><button id="copyid" class="chip ghost" title="Copy session ID" hidden>ID</button><button id="history" class="chip ghost" title="Open an earlier session in this project">\u{1F553}</button><span id="status"></span><button id="newtab" class="chip ghost" title="New chat in this project">+</button></div></header><main id="messages"><div class="empty">Select a session or start a new Claude/Codex chat.</div></main><footer><div id="thinking" hidden><span id="spinner"></span><span id="thinkword">Cooking</span><span id="thinktime"></span><span id="thinktokens"></span><button id="cancel" title="Stop this turn">Stop</button></div><div class="composer-box"><div id="queue"></div><div id="attachments"></div><textarea id="input" rows="3" placeholder="Ask Claude or Codex…"></textarea><div class="composerbar"><button id="attach" class="chip ghost" title="Attach an image">\u{1F4CE}</button><input id="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden><button id="slash" class="chip ghost" title="Slash command">/</button><button id="model" class="chip ghost" title="Model">auto</button><button id="effort" class="chip ghost" title="Thinking effort">auto</button><span id="cachewrap" class="quota" hidden><span id="cachelab" class="qlab">cache</span><span id="cachetext"></span><span id="cachetip" class="qtip" role="tooltip"></span></span><span class="spacer"></span><span id="q5wrap" class="quota" hidden><svg width="18" height="18" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="q5arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="q5lab" class="qlab"></span><span id="q5text"></span><span id="q5tip" class="qtip" role="tooltip"></span></span><span id="q7wrap" class="quota" hidden><svg width="18" height="18" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="q7arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="q7lab" class="qlab"></span><span id="q7text"></span><span id="q7tip" class="qtip" role="tooltip"></span></span><button id="ctxwrap" title="Context left \u2014 click to compact"><svg id="donut" width="22" height="22" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--vscode-panel-border)" stroke-width="3"></circle><circle id="arc" cx="13" cy="13" r="10" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 62.8"></circle></svg><span id="ctxtext">—</span><span id="ctxtokens"></span><span id="ctxtip" class="qtip" role="tooltip"></span></span><button id="send" title="Send (⏎)">↑</button></div></div></footer>`;}
 let assetCache:{css:string;script:string}|undefined;
 export function webviewAssets(){
   if(assetCache)return assetCache;

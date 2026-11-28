@@ -32,6 +32,7 @@ flowchart TB
 
   subgraph PROV["AgentProvider implementations"]
     CL["Claude provider<br/>spawn CLI, stream-json"]
+    CX["Codex provider<br/>spawn CLI, app-server"]
     PL["Daemon provider<br/>HTTP + SSE, spawns nothing"]
   end
 

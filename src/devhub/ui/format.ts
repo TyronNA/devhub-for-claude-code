@@ -2,7 +2,7 @@ import { UsageSnapshot } from '../types';
 import { quotaIsStale } from '../usage/usageAggregator';
 /** A provider's display name. One single place — it used to be seven scattered ternaries, and
  *  a third provider made all of them lie and say "Codex". */
-const LABELS:Record<string,string>={claude:'Claude',planner:'Planner'};
+const LABELS:Record<string,string>={claude:'Claude',codex:'Codex',planner:'Planner'};
 export function providerLabel(id:string|undefined){return LABELS[String(id)]||String(id||'Agent');}
 export function compactNumber(n:number|undefined){ if(n===undefined)return '—'; if(Math.abs(n)>=1_000_000)return `${(n/1_000_000).toFixed(n>=10_000_000?0:1).replace(/\.0$/,'')}m`; if(Math.abs(n)>=1_000)return `${(n/1_000).toFixed(n>=100_000?0:1).replace(/\.0$/,'')}k`; return String(n); }
 /** Every quota/context number in the UI is what is LEFT — the chat rings too;

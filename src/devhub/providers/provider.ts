@@ -1,6 +1,6 @@
 import { DevHubEvent, DevHubProject, DevHubSession, ProviderId } from '../types';
 /** Model/effort chosen per turn; each provider maps them to its own CLI flags.
- *  `images`: paths of saved images — Claude appends them to the prompt. */
+ *  `images`: paths of saved images — Codex takes them via `-i`, Claude appends them to the prompt. */
 export interface TurnOptions { model?:string; effort?:string; images?:string[]; }
 export interface StartSessionInput extends TurnOptions { workspaceId:string; projectId:string; cwd:string; prompt:string; }
 export interface ResumeSessionInput extends TurnOptions { session:DevHubSession; prompt:string; }

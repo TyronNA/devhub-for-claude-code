@@ -26,7 +26,7 @@ export class SessionManager {
   private outOfTurnWrites:Promise<any>=Promise.resolve();
   /**
    * `active` MUST also be keyed by provider: a native id isn't exclusive to one CLI —
-   * Claude and the planner may carry the same string, and a map keyed only by id lets a later turn overwrite
+   * Codex and the planner may carry the same string, and a map keyed only by id lets a later turn overwrite
    * an earlier one, `runningCount()` undercounts, and `cancel()` cancels another provider's session.
    */
   private akey(provider:string,nativeId:string){return `${provider}\u0000${nativeId}`;}
@@ -72,6 +72,15 @@ export class SessionManager {
     if(this.claimed.has(key)||this.active.has(this.akey(provider,nativeId)))throw new Error('That session is already running a turn');
     this.claimed.add(key); return key;
   }
+  /**
+   * Locks a session for an operation OUTSIDE a turn (compaction over the app-server, takes a minute or more).
+   * Without the lock the session still reads `done` and a resume could slip in mid-compaction.
+   * Takes no concurrency slot — compaction is not a turn.
+   */
+  async withSessionLock<T>(session:DevHubSession,fn:()=>Promise<T>):Promise<T>{
+    const lock=this.claim(session.provider,session.nativeSessionId);
+    try{ return await fn(); } finally { this.claimed.delete(lock); }
+  }
   async start(input:{provider:ProviderId;workspaceId:string;projectId:string;cwd:string;prompt:string;model?:string;effort?:string;images?:string[]}){
     this.reserveSlot();
     let handle:ProviderTurnHandle|undefined;
@@ -90,6 +99,27 @@ export class SessionManager {
     } catch(e){await handle?.cancel().catch(()=>{});throw e;} finally { this.reserved--; this.claimed.delete(lock); }
   }
   private consume(session:DevHubSession,handle:ProviderTurnHandle){ const initialId=session.nativeSessionId; const task=(async()=>{let current=session;let sawError=false;try{for await(const event of handle.events){ const native=handle.getNativeSessionId(); if(native&&native!==current.nativeSessionId){const old=current.nativeSessionId;await this.store.rekey(current.provider,old,native);current={...current,nativeSessionId:native};const runtime=this.active.get(this.akey(current.provider,old));this.active.delete(this.akey(current.provider,old));if(runtime)this.active.set(this.akey(current.provider,native),{...runtime,session:current});this.emitter.emit('sessionRekeyed',{provider:current.provider,oldId:old,newId:native,session:current});} let shouldPersist=false;if(event.type==='usage'){current={...current,usage:mergeSessionUsage(current.usage,event.usage),updatedAt:Date.now()};shouldPersist=true;} if(event.type==='error')sawError=true; this.emitter.emit('event',{provider:current.provider,sessionId:current.nativeSessionId,event}); if(shouldPersist)await this.store.upsert(current); } current={...current,status:this.cancelledHandles.has(handle)?'cancelled':(sawError?'failed':'done'),updatedAt:Date.now()};await this.store.upsert(current);this.emitter.emit('sessionUpdated',current);}catch(e:any){current={...current,status:this.cancelledHandles.has(handle)?'cancelled':'failed',updatedAt:Date.now()};await this.store.upsert(current);this.emitter.emit('event',{provider:current.provider,sessionId:current.nativeSessionId,event:{type:'error',message:String(e?.message||e),timestamp:Date.now()}});this.emitter.emit('sessionUpdated',current);}finally{this.active.delete(this.akey(current.provider,current.nativeSessionId));this.active.delete(this.akey(session.provider,initialId));}})(); this.active.set(this.akey(session.provider,initialId),{handle,task,session});this.tasks.add(task);task.finally(()=>this.tasks.delete(task)); }
+
+
+  async updateUsage(session:DevHubSession,usage:UsageSnapshot){
+    const current=await this.store.get(session.provider,session.nativeSessionId)??session;
+    const updated={...current,usage:mergeSessionUsage(current.usage,usage),updatedAt:Date.now()};
+    await this.store.upsert(updated);
+    this.emitter.emit('sessionUpdated',updated);
+    return updated;
+  }
+
+  /** Restore counters accumulated in the transcript; no merge, to avoid double-counting old turns. */
+  async restoreHistoricalUsage(session:DevHubSession,usage:UsageSnapshot){
+    const current=await this.store.get(session.provider,session.nativeSessionId)??session;
+    const next={...(current.usage||{})}; let changed=false;
+    for(const key of ['inputTokens','cachedInputTokens','cacheWriteInputTokens','outputTokens','reasoningOutputTokens'] as Array<keyof UsageSnapshot>){
+      if(next[key]===undefined&&usage[key]!==undefined){(next as any)[key]=usage[key];changed=true;}
+    }
+    if(!changed)return current;
+    const updated={...current,usage:next,updatedAt:Date.now()};
+    await this.store.upsert(updated);this.emitter.emit('sessionUpdated',updated);return updated;
+  }
 
   /**
    * Changing model/effort in the picker changes it for the session right away, even before any turn — closing the tab

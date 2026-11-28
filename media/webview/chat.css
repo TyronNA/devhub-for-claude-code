@@ -5,8 +5,9 @@
    HC-light carries BOTH classes (back-compat), so it must be excluded from the dark branch. */
 body.vscode-dark,body.vscode-high-contrast:not(.vscode-high-contrast-light){--strong:color-mix(in srgb,var(--vscode-editor-foreground),#fff 45%)}
 body.vscode-light,body.vscode-high-contrast-light{--strong:color-mix(in srgb,var(--vscode-editor-foreground),#000 45%)}
-/* Claude = terracotta. Set on body so everything shares one variable. */
+/* Claude = terracotta, Codex = OpenAI green. Set on body so everything shares one variable. */
 body[data-provider="claude"]{--accent:#d97757;--accent-soft:rgba(217,119,87,.13)}
+body[data-provider="codex"]{--accent:#10a37f;--accent-soft:rgba(16,163,127,.13)}
 body[data-provider="planner"]{--accent:#8b7cf8;--accent-soft:rgba(139,124,248,.14)}
 /* Planner is an HTTP daemon: it picks its own model, `POST /chat` carries no model/effort, and
    compacting context is a CLI concept. Those three buttons are dead on a planner tab — hide them rather

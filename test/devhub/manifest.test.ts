@@ -36,12 +36,14 @@ test('command titles keep the Dev Hub prefix for the palette but expose a short 
 });
 
 
-test('brand icons are packaged',()=>{
+test('brand icons are packaged and the light/dark pair actually differs where it must',()=>{
   const media=path.join(process.cwd(),'media');
   const pkg=JSON.parse(fs.readFileSync(path.join(process.cwd(),'package.json'),'utf8'));
   assert.ok(pkg.files.includes('media'),'media must be in "files" or the VSIX will lack icons');
-  for(const n of ['claude-light.svg','claude-dark.svg'])
+  for(const n of ['claude-light.svg','claude-dark.svg','codex-light.svg','codex-dark.svg'])
     assert.ok(fs.existsSync(path.join(media,n)),'missing '+n);
+  // A dark-on-dark mark vanishes on a dark theme -> the two variants must differ.
+  assert.notEqual(fs.readFileSync(path.join(media,'codex-light.svg'),'utf8'),fs.readFileSync(path.join(media,'codex-dark.svg'),'utf8'),'codex light/dark must differ');
 });
 
 test('the agents list ships empty so no personal paths leak, but the commands are there',()=>{

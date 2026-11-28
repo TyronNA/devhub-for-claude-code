@@ -2,10 +2,14 @@ export {};
 const test=require('node:test');const assert=require('node:assert/strict');const Module=require('node:module');
 const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');
 import { parseWebviewMessage } from '../../src/devhub/views/webviewProtocol';
+// The Codex model picker prefers the live catalog in ~/.codex over settings; point it at an empty home so
+// the machine's own catalog can't decide what the picker offers.
+process.env.CODEX_HOME=require('node:fs').mkdtempSync(path.join(os.tmpdir(),'devhub-codex-home-'));
 
 function mockVscode(){
   const panels:any[]=[];const warnings:string[]=[];
-  const settings:Record<string,any>={'claude.model':'opus','claude.effort':'medium','claude.models':['opus','sonnet']};
+  const settings:Record<string,any>={'claude.model':'opus','claude.effort':'medium','claude.models':['opus','sonnet'],
+    'codex.model':'gpt-5.6-luna','codex.effort':'xhigh','codex.models':['gpt-5.6-luna','gpt-5.5']};
   const commands:string[]=[];const serializers:any[]=[];
   return {panels,settings,warnings,commands,serializers,mock:{
     ViewColumn:{Beside:2},Uri:{file:(p:string)=>p},
@@ -117,7 +121,7 @@ test('webview renders content without innerHTML',()=>{
   }finally{Module._load=original;}
 });
 
-test('webview themes Claude and planner differently and exposes the composer controls',()=>{
+test('webview themes Claude and Codex differently and exposes the composer controls',()=>{
   const original=Module._load;const v=mockVscode();
   Module._load=function(r:string){if(r==='vscode')return v.mock;return original.apply(this,arguments as any);};
   try{
@@ -126,6 +130,7 @@ test('webview themes Claude and planner differently and exposes the composer con
     const html=(c as any).html({});
     assert.ok(/body\[data-provider="claude"\]\{--accent:#d97757/.test(html),'Claude must have its own accent');
     assert.ok(/body\[data-provider="planner"\]\{--accent:#8b7cf8/.test(html),'Planner must have its own accent');
+    assert.ok(/body\[data-provider="codex"\]\{--accent:#10a37f/.test(html),'Codex must have its own accent');
     const script=html.match(/<script nonce="[^"]+">([\s\S]*)<\/script>/)[1];
     assert.ok(script.includes("setAttribute('data-provider'"),'the script must set data-provider per provider');
     for(const id of ['model','effort','donut','arc','ctxtext','ctxtokens','ctxwrap','q5wrap','q5arc','q5text','q7wrap','q7arc','q7text','q5tip','q7tip','ctxtip'])assert.ok(html.includes('id="'+id+'"'),'missing control: '+id);
@@ -170,33 +175,38 @@ test('new chats start from the configured per-provider model and effort',async()
   await withVscode(async (v,ChatPanelProvider)=>{
     const started:any[]=[];
     const manager={on:()=>()=>{},async start(i:any){started.push(i);return {...SESSION('new'),provider:i.provider};}};
-    const providers={claude:{loadTranscript:async()=>[],isAvailable:async()=>true}};
+    const providers={claude:{loadTranscript:async()=>[],isAvailable:async()=>true},codex:{loadTranscript:async()=>[],isAvailable:async()=>true}};
     const c=new ChatPanelProvider(manager,providers,LOOKUP,()=>{},()=>{},()=>{});
     const snap=await LOOKUP();
     await c.newChat(snap.workspaces[0],snap.projects[0],'claude');
     await v.panels[0].handler({type:'sendPrompt',text:'hi'});
     assert.equal(started[0].model,'opus');
     assert.equal(started[0].effort,'medium');
+
+    await c.newChat(snap.workspaces[0],snap.projects[0],'codex');
+    await v.panels[1].handler({type:'sendPrompt',text:'hi'});
+    assert.equal(started[1].model,'gpt-5.6-luna');
+    assert.equal(started[1].effort,'xhigh');
     c.dispose();
   });
 });
 
 test('the chosen model/effort belongs to the session: closing and reopening the tab does not fall back to default',async()=>{
   await withVscode(async (v,ChatPanelProvider)=>{
-    v.mock.window.showQuickPick=async(items:any[])=>items.find((i:any)=>i.value==='sonnet');
-    let stored:any={...SESSION('c'),provider:'claude'};
+    v.mock.window.showQuickPick=async(items:any[])=>items.find((i:any)=>i.value==='gpt-5.5');
+    let stored:any={...SESSION('c'),provider:'codex'};
     const manager:any={on:()=>()=>{},isBusy:()=>false,
       setTurnOptions:async(sess:any,o:any)=>{stored={...sess,...o};return stored;}};
-    const providers={claude:{loadTranscript:async()=>[],isAvailable:async()=>true}};
+    const providers={codex:{loadTranscript:async()=>[],isAvailable:async()=>true}};
     const c=new ChatPanelProvider(manager,providers,LOOKUP,()=>{},()=>{},()=>{});
     await c.openSession(stored);
     await v.panels[0].handler({type:'pickModel'});
-    assert.equal(stored.model,'sonnet','the picker must write the choice to the session, not only to the tab');
+    assert.equal(stored.model,'gpt-5.5','the picker must write the choice to the session, not only to the tab');
     // Close the tab then reopen that same session: the new tab must read the session's choice.
     v.panels[0].dispose();
     await c.openSession(stored);
     const opts=v.panels[v.panels.length-1].posted.filter((m:any)=>m.type==='optionsChanged').pop();
-    assert.equal(opts.model,'sonnet','reopening must not fall back to devHub.claude.model');
+    assert.equal(opts.model,'gpt-5.5','reopening must not fall back to devHub.codex.model');
     c.dispose();
   });
 });
@@ -204,9 +214,12 @@ test('the chosen model/effort belongs to the session: closing and reopening the 
 test('effort choices stay within what each CLI accepts',()=>{
   const pkg=JSON.parse(require('node:fs').readFileSync(require('node:path').join(process.cwd(),'package.json'),'utf8'));
   const claude=pkg.contributes.configuration.properties['devHub.claude.effort'].enum;
+  const codex=pkg.contributes.configuration.properties['devHub.codex.effort'].enum;
   assert.ok(claude.includes('max'),'Claude has --effort max');
+  assert.ok(codex.includes('max')&&codex.includes('ultra')&&codex.includes('xhigh'),'the live catalog has max/ultra for newer Codex models');
   assert.equal(pkg.contributes.configuration.properties['devHub.claude.model'].default,'opus');
   assert.equal(pkg.contributes.configuration.properties['devHub.claude.effort'].default,'medium');
+  assert.equal(pkg.contributes.configuration.properties['devHub.codex.model'].default,'gpt-6-luna');
 });
 
 test('composer chips never show the word Default and carry model and effort',()=>{
@@ -273,6 +286,7 @@ test('the provider chip draws the brand mark inline instead of loading a file',(
     const script=html.match(/<script nonce="[^"]+">([\s\S]*)<\/script>/)[1];
     assert.ok(script.includes('createElementNS'),'must build inline SVG');
     assert.ok(/MARK=\{claude:'M[^']{200,}'/.test(script),'the logo path must be embedded');
+    assert.ok(/codex:'M[^']+'/.test(script),'the Codex mark must be embedded');
     // empty localResourceRoots => every file reference in the webview dies
     assert.equal(/media\/[a-z-]+\.svg/.test(html),false,'the webview must not point at an svg file');
     assert.equal(/<img/.test(html),false,'no <img>');
@@ -298,15 +312,21 @@ test('chat turns carry no You/Claude label — border and colour say who spoke',
 
 test('a chat tab is titled by project alone and carries the brand icon',async()=>{
   await withVscode(async (v,ChatPanelProvider)=>{
-    const providers={claude:{loadTranscript:async()=>[],isAvailable:async()=>true}};
+    const providers={claude:{loadTranscript:async()=>[],isAvailable:async()=>true},codex:{loadTranscript:async()=>[],isAvailable:async()=>true}};
     const c=new ChatPanelProvider({on:()=>()=>{}},providers,LOOKUP,()=>{},()=>{},()=>{},'','/MEDIA');
     await c.openSession(SESSION('a'));
     const panel=v.panels[0];
     await panel.handler({type:'ready'});
     assert.equal(panel.title,'Proj','the title is just the project name');
-    assert.equal(/Claude/.test(panel.title),false,'the provider name must not be in the title');
+    assert.equal(/Claude|Codex/.test(panel.title),false,'the provider name must not be in the title');
     assert.ok(panel.iconPath&&panel.iconPath.light&&panel.iconPath.dark,'must set iconPath');
     assert.ok(String(panel.iconPath.dark).includes('claude-dark.svg'),'sai file: '+panel.iconPath.dark);
+
+    const snap=await LOOKUP();
+    await c.newChat(snap.workspaces[0],snap.projects[0],'codex');
+    const codexPanel=v.panels[v.panels.length-1];
+    await codexPanel.handler({type:'ready'});
+    assert.ok(String(codexPanel.iconPath.dark).includes('codex-dark.svg'),'a Codex tab must use the Codex mark');
     c.dispose();
   });
 });
@@ -651,6 +671,28 @@ test('removing a queued message takes it out for good',async()=>{
   });
 });
 
+test('compact persists context and updates the host session before the next compaction',async()=>{
+  await withVscode(async(v,ChatPanelProvider)=>{
+    const {SessionManager}=require('../../src/devhub/sessions/sessionManager');
+    let saved={...SESSION('compact'),provider:'codex',usage:{contextUsedTokens:100,inputTokens:30}};
+    const before:number[]=[];
+    const manager=new SessionManager({get:async()=>saved,upsert:async(s:any)=>{saved=s;}},{});
+    const providers={codex:{loadTranscript:async()=>[],compact:async(s:any,emit:any)=>{
+      before.push(s.usage.contextUsedTokens);
+      emit({type:'usage',usage:{contextUsedTokens:20},timestamp:1});
+    }}};
+    const c=new ChatPanelProvider(manager,providers,LOOKUP,()=>{},()=>{},()=>{});
+    try{
+      await c.openSession(saved);const panel=v.panels[0];
+      await panel.handler({type:'compact'});
+      assert.equal(saved.usage.contextUsedTokens,20);
+      assert.equal(saved.usage.inputTokens,30);
+      assert.ok(panel.posted.some((m:any)=>m.type==='sessionUpdated'&&m.session.usage.contextUsedTokens===20));
+      await panel.handler({type:'compact'});assert.deepEqual(before,[100,20]);
+    }finally{c.dispose();}
+  });
+});
+
 test('a pending AskUserQuestion is re-posted after the webview re-renders, and never twice',async()=>{
   await withVscode(async (v,ChatPanelProvider)=>{
     const providers={claude:{loadTranscript:async()=>[],isAvailable:async()=>true}};
@@ -782,13 +824,27 @@ test('restoring selection opens the transcript when no editor tab exists',async(
   });
 });
 
+test('opening old codex history corrects persisted context without adding billing totals',async()=>{
+  await withVscode(async(v,C)=>{
+    let saved={...SESSION('old'),provider:'codex',usage:{contextUsedTokens:603297,contextWindowTokens:384000,inputTokens:599419}};
+    const c=new C({on:()=>()=>{},updateUsage:async(s:any,u:any)=>saved={...s,usage:{...s.usage,...u}}},
+      {codex:{loadTranscript:async()=>[{type:'usage',usage:{contextUsedTokens:82883,contextWindowTokens:364800},timestamp:1}]}},LOOKUP,()=>{},()=>{},()=>{});
+    try{await c.openSession(saved);
+      assert.equal(saved.usage.contextUsedTokens,82883);assert.equal(saved.usage.inputTokens,599419);
+      const selected=v.panels[0].posted.find((m:any)=>m.type==='sessionSelected');
+      assert.equal(selected.session.usage.contextWindowTokens,364800);
+    }finally{c.dispose();}
+  });
+});
+
 test('an image path becomes a webview URI on the way out, and stays a path in the cache',async()=>{
   await withVscode(async(v,ChatPanelProvider)=>{
     const path=require('node:path');
-    const p=path.join(require('node:os').tmpdir(),'t1','exec-1.png');
-    const providers={claude:{loadTranscript:async()=>[{type:'assistant_image',path:p,alt:'sprite',timestamp:1}],isAvailable:async()=>true}};
+    const {codexImageRoot}=require('../../src/devhub/providers/codex/codexEventParser');
+    const p=path.join(codexImageRoot(),'t1','exec-1.png');
+    const providers={codex:{loadTranscript:async()=>[{type:'assistant_image',path:p,alt:'sprite',timestamp:1}],isAvailable:async()=>true}};
     const c=new ChatPanelProvider({on:()=>()=>{}},providers,LOOKUP,()=>{},()=>{},()=>{});
-    await c.openSession({...SESSION('a'),provider:'claude'});
+    await c.openSession({...SESSION('a'),provider:'codex'});
     const selected=v.panels[0].posted.find((m:any)=>m.type==='sessionSelected');
     const img=selected.events.find((e:any)=>e.type==='assistant_image');
     // Only becomes a URI at send time; what sits in the host cache is still the short path.
@@ -998,10 +1054,10 @@ test('the first message of a brand-new chat shows its image too',async()=>{
 test('an image that only exists as a data uri is passed through, not turned into a file uri',async()=>{
   await withVscode(async(v,ChatPanelProvider)=>{
     const src='data:image/png;base64,aGk=';
-    const providers={claude:{isAvailable:async()=>true,
+    const providers={codex:{isAvailable:async()=>true,
       loadTranscript:async()=>[{type:'user_message',text:'here is the image',images:[src],timestamp:1}]}};
     const c=new ChatPanelProvider({on:()=>()=>{}},providers,LOOKUP,()=>{},()=>{},()=>{});
-    await c.openSession({...SESSION('a'),provider:'claude'});
+    await c.openSession({...SESSION('a'),provider:'codex'});
     const selected=v.panels[0].posted.find((m:any)=>m.type==='sessionSelected');
     const um=selected.events.find((e:any)=>e.type==='user_message');
     assert.deepEqual(um.imageSrcs,[src]);

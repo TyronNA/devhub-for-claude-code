@@ -106,7 +106,7 @@ function renderQuotas(){const u=(state.session&&state.session.usage)||{};
   renderQuota('q7','7d','Weekly limit',u.quota7dUsedPercentage,u.quota7dObservedAt,u.quota7dResetsAt,ins&&ins.week?{win:ins.week,day:false,at:ins.observedAt}:null);
   renderCache(u);
   // The `usage` event only arrives once per turn, but the `~` and the countdown in the tooltip follow the clock.
-  // The clock only lives while there is a ring to move: a Planner tab spawns no useless timer.
+  // The clock only lives while there is a ring to move: a Codex/Planner tab spawns no useless timer.
   const cw=$('cachewrap');const live=!$('q5wrap').hidden||!$('q7wrap').hidden||(cw&&!cw.hidden);
   if(live&&!quotaTimer)quotaTimer=setInterval(renderQuotas,60*1000);
   else if(!live&&quotaTimer){clearInterval(quotaTimer);quotaTimer=null}}
@@ -117,9 +117,9 @@ function tokenTip(u){u=u||{};const p=[];
   if(u.costUsd!=null)p.push('Cost: $'+Number(u.costUsd).toFixed(4));
   return p.join('\n')||'No token data yet'}
 function remember(e){state.events.push(e);if(state.events.length>1500)state.events.splice(0,state.events.length-1500)}
-function providerName(p){return p==='planner'?'Planner':'Claude'}
+function providerName(p){return p==='codex'?'Codex':p==='planner'?'Planner':'Claude'}
 // Brand mark drawn inline: localResourceRoots only opens the media root, other files can't be loaded.
-const MARK={claude:'M8.8 12a3.2 3.2 0 1 0 6.4 0a3.2 3.2 0 1 0 -6.4 0ZM9.9 4a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM2.972 8a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM2.972 16a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM9.9 20a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM16.828 16a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM16.828 8a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0Z',planner:'M12 .5a1.9 1.9 0 0 1 0 3.8 1.9 1.9 0 0 1 0-3.8zM11.15 3h1.7v5.2h-1.7zM7 7h10a4 4 0 0 1 4 4v4a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4zM9.2 11.7a1.7 1.7 0 0 0 0 3.4 1.7 1.7 0 0 0 0-3.4zM14.8 11.7a1.7 1.7 0 0 0 0 3.4 1.7 1.7 0 0 0 0-3.4z'};
+const MARK={claude:'M8.8 12a3.2 3.2 0 1 0 6.4 0a3.2 3.2 0 1 0 -6.4 0ZM9.9 4a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM2.972 8a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM2.972 16a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM9.9 20a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM16.828 16a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM16.828 8a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0Z',codex:'M3.6 6.6 5.2 5l6.6 6.6-6.6 6.6-1.6-1.6 5-5zM12.4 16.4h8v2.2h-8z',planner:'M12 .5a1.9 1.9 0 0 1 0 3.8 1.9 1.9 0 0 1 0-3.8zM11.15 3h1.7v5.2h-1.7zM7 7h10a4 4 0 0 1 4 4v4a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4zM9.2 11.7a1.7 1.7 0 0 0 0 3.4 1.7 1.7 0 0 0 0-3.4zM14.8 11.7a1.7 1.7 0 0 0 0 3.4 1.7 1.7 0 0 0 0-3.4z'};
 function mark(p,size){const ns='http://www.w3.org/2000/svg';const svg=document.createElementNS(ns,'svg');const px=String(size||14);
   svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width',px);svg.setAttribute('height',px);svg.setAttribute('class','mark');
   const path=document.createElementNS(ns,'path');path.setAttribute('d',MARK[p]||'');path.setAttribute('fill','currentColor');
@@ -867,7 +867,7 @@ function send(){const t=$('input');const typed=t.value.trim();
   if(pending.some(a=>!a.path)){showError('The image is still being saved. Wait a moment and send again.');return}
   const paths=pending.filter(a=>a.path).map(a=>a.path);
   if(!typed&&!paths.length)return; if($('send').disabled)return;
-  // Images travel as a separate field; the host joins them into the prompt.
+  // Images travel as a separate field: Codex attaches them with -i, the host joins them into Claude's prompt.
   vscode.postMessage(paths.length?{type:'sendPrompt',text:typed,attachments:paths}:{type:'sendPrompt',text:typed});
   t.value='';pending.length=0;renderAttachments();measure();grow();saveState()}
 restoreDraft();

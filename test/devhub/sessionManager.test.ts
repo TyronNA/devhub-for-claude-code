@@ -56,14 +56,15 @@ test('recovery marks missing stale transcript unavailable and incomplete transcr
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-manager-recover-missing-'));
   const store=new SessionStore(dir);
   await store.upsert({provider:'claude',nativeSessionId:'missing',workspaceId:'w',projectId:'p',cwd:'/tmp/repo',title:'missing',status:'running',createdAt:1,updatedAt:1} as any);
-  await store.upsert({provider:'claude',nativeSessionId:'partial',workspaceId:'w',projectId:'p',cwd:'/tmp/repo',title:'partial',status:'running',createdAt:1,updatedAt:1} as any);
+  await store.upsert({provider:'codex',nativeSessionId:'partial',workspaceId:'w',projectId:'p',cwd:'/tmp/repo',title:'partial',status:'running',createdAt:1,updatedAt:1} as any);
   const providers:any={
-    claude:{id:'claude',loadTranscript:async(s:any)=>{if(s.nativeSessionId==='missing')throw new Error('not found');return [{type:'assistant_message',text:'still going',timestamp:1}];}}
+    claude:{id:'claude',loadTranscript:async()=>{throw new Error('not found')}},
+    codex:{id:'codex',loadTranscript:async()=>[{type:'assistant_message',text:'still going',timestamp:1}]}
   };
   const manager=new SessionManager(store,providers,4);
   await manager.recoverStaleSessions();
   assert.equal((await store.get('claude','missing'))?.status,'unavailable');
-  assert.equal((await store.get('claude','partial'))?.status,'imported');
+  assert.equal((await store.get('codex','partial'))?.status,'imported');
 });
 
 test('resuming a session accumulates token usage across turns', async()=>{
@@ -95,8 +96,8 @@ test('streaming deltas do not persist session metadata on every token', async()=
 test('three concurrent sessions keep events isolated by native session id',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-manager-concurrent-'));const store=new SessionStore(dir);let seq=0;
   const makeProvider=(id:string)=>({id,isAvailable:async()=>true,start:async()=>{const sid=`${id}-${++seq}`;return {getNativeSessionId:()=>sid,cancel:async()=>{},events:(async function*(){yield {type:'assistant_message',text:sid,timestamp:Date.now()} as any;await new Promise(r=>setTimeout(r,15));yield {type:'turn_done',timestamp:Date.now()} as any;})()};},resume:async()=>{throw new Error('unused')},discoverHistory:async()=>[],loadTranscript:async()=>[]});
-  const manager=new SessionManager(store,{claude:makeProvider('claude') as any},4);const seen:any[]=[];manager.on('event',(x:any)=>{if(x.event.type==='assistant_message')seen.push([x.sessionId,x.event.text]);});
-  await Promise.all([manager.start({provider:'claude',workspaceId:'w',projectId:'p1',cwd:'/tmp',prompt:'1'}),manager.start({provider:'claude',workspaceId:'w',projectId:'p2',cwd:'/tmp',prompt:'2'}),manager.start({provider:'claude',workspaceId:'w',projectId:'p3',cwd:'/tmp',prompt:'3'})]);assert.equal(manager.runningCount(),3);await manager.waitForIdle();
+  const manager=new SessionManager(store,{claude:makeProvider('claude') as any,codex:makeProvider('codex') as any},4);const seen:any[]=[];manager.on('event',(x:any)=>{if(x.event.type==='assistant_message')seen.push([x.sessionId,x.event.text]);});
+  await Promise.all([manager.start({provider:'claude',workspaceId:'w',projectId:'p1',cwd:'/tmp',prompt:'1'}),manager.start({provider:'codex',workspaceId:'w',projectId:'p2',cwd:'/tmp',prompt:'2'}),manager.start({provider:'claude',workspaceId:'w',projectId:'p3',cwd:'/tmp',prompt:'3'})]);assert.equal(manager.runningCount(),3);await manager.waitForIdle();
   assert.equal(seen.length,3);assert.equal(seen.every(([id,text])=>id===text),true);
 });
 

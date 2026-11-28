@@ -2,8 +2,9 @@ export {};
 const test=require('node:test'),assert=require('node:assert/strict');
 const {ProcessRunner}=require('../../src/devhub/providers/processRunner');
 const {ClaudeProvider}=require('../../src/devhub/providers/claude/claudeProvider');
+const {CodexAppServer}=require('../../src/devhub/providers/codex/codexAppServer');
 const {SessionManager}=require('../../src/devhub/sessions/sessionManager');
-const session={provider:'claude',nativeSessionId:'t',cwd:process.cwd(),status:'done',usage:{inputTokens:9,contextUsedTokens:100}};
+const session={provider:'codex',nativeSessionId:'t',cwd:process.cwd(),status:'done',usage:{inputTokens:9,contextUsedTokens:100}};
 function fakeRunner(stall?:string){
  const calls:any[]=[];let cancelled=0;
  return {calls,get cancelled(){return cancelled},spawnDuplex(o:any){calls.push(o);let wake:any;const lines:string[]=[];let done=false;
@@ -28,10 +29,30 @@ test('Claude options changes restart and resume, unchanged options reuse process
  assert.ok(r.calls[1].args.includes(id));assert.ok(r.calls[1].args.includes('sonnet'));assert.ok(r.calls[1].args.includes('high'));
  }finally{p.dispose();}
 });
+for(const stage of ['initialize','thread/resume','thread/compact/start'])test('compact deadline covers '+stage,async()=>{
+ const r=fakeRunner(stage),server=new CodexAppServer(r);let error:any;
+ const task=server.compact('t',process.cwd(),()=>{},{timeoutMs:20}).catch((e:any)=>{error=e;});
+ await Promise.race([task,new Promise(r=>setTimeout(r,100))]);
+ try{assert.match(error?.message||'',/timed out/);assert.equal(r.cancelled,1);}finally{await server.close();}
+});
 for(const method of ['start','resume'])test(method+' cancels spawned handle if persistence fails',async()=>{
  let cancelled=0;const h={getNativeSessionId:()=> 't',events:(async function*(){})(),cancel:async()=>{cancelled++}};
  const p={isAvailable:async()=>true,start:async()=>h,resume:async()=>h};
- const m=new SessionManager({upsert:async()=>{throw Error('disk full')}},{claude:p});
+ const m=new SessionManager({upsert:async()=>{throw Error('disk full')}},{codex:p});
  await assert.rejects(method==='start'?m.start({...session,prompt:'a'}):m.resume(session,'a'),/disk full/);
  assert.equal(cancelled,1);assert.equal(m.runningCount(),0);
+});
+test('out of turn usage persists and broadcasts the updated session',async()=>{
+ let saved:any,updated:any;const m=new SessionManager({get:async()=>session,upsert:async(s:any)=>{saved=s}},{});
+ m.on('sessionUpdated',(s:any)=>updated=s);
+ await m.updateUsage(session,{contextUsedTokens:20});assert.equal(saved.usage.contextUsedTokens,20);assert.equal(saved.usage.inputTokens,9);assert.equal(updated,saved);
+});
+test('historical usage fills missing cache counters without adding them twice',async()=>{
+ let saved:any,current:any={...session,usage:{contextUsedTokens:100}};const m=new SessionManager({get:async()=>current,upsert:async(s:any)=>{current=s;saved=s}},{});
+ const restored=await m.restoreHistoricalUsage(session,{inputTokens:21880,cachedInputTokens:12160,cacheWriteInputTokens:400,outputTokens:225,reasoningOutputTokens:12});
+ assert.deepEqual(restored.usage,{contextUsedTokens:100,inputTokens:21880,cachedInputTokens:12160,cacheWriteInputTokens:400,outputTokens:225,reasoningOutputTokens:12});
+ assert.deepEqual(saved.usage,restored.usage);
+ const again=await m.restoreHistoricalUsage(restored,{inputTokens:99999,cachedInputTokens:99999});
+ assert.equal(again.usage.inputTokens,21880);
+ assert.equal(again.usage.cachedInputTokens,12160);
 });

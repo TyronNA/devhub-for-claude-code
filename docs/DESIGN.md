@@ -737,24 +737,26 @@ Prompts travel over **stdin**, never `argv`, so they never appear in `ps` and ar
 
 ## How each CLI is driven
 
-| | Claude |
-|---|---|
-| Transport | one long-lived process, `--print --input-format stream-json --output-format stream-json --verbose` (see note) |
-| Streaming | `--include-partial-messages` (token deltas) |
-| Prompt | stdin JSON, echoed back by `--replay-user-messages` |
-| Session id | Dev Hub mints it, passed as `--session-id` |
-| Images | path in the prompt |
-| Resume | `--resume <id>` |
-| Model / effort | `--model` / `--effort` |
-| System prompt | `--append-system-prompt` |
-| Permissions | `--permission-prompt-tool stdio` |
-| Rate limits | `rate_limit_event` |
-| Model list | settings |
-| Slash commands | `system init`, cached in `globalState` |
+| | Claude | Codex |
+|---|---|---|
+| Transport | one long-lived process, `--print --input-format stream-json --output-format stream-json --verbose` (see note) | `codex exec --json`, one process per turn |
+| Streaming | `--include-partial-messages` (token deltas) | `--json` events |
+| Prompt | stdin JSON, echoed back by `--replay-user-messages` | stdin, via `--` then `-` |
+| Session id | Dev Hub mints it, passed as `--session-id` | assigned by the CLI, read from the stream |
+| Images | path in the prompt | `-i` after `resume <id>`, before `--` |
+| Resume | `--resume <id>` | `resume <id>` |
+| Model / effort | `--model` / `--effort` | `-m` / `-c model_reasoning_effort=…` |
+| System prompt | `--append-system-prompt` | `-c developer_instructions=…` |
+| Permissions | `--permission-prompt-tool stdio` | — |
+| Rate limits | `rate_limit_event` | — |
+| Model list | settings | live `~/.codex/models_cache.json` |
+| Slash commands | `system init`, cached in `globalState` | not published |
+| Trust gate | — | `--skip-git-repo-check` |
 
-Dev Hub mints Claude's session id up front and passes it as `--session-id`. The manager can
-still **rekey** the store, the event buffer and the open tab from a `pending:` placeholder when a
-turn's handle reveals a different id mid-stream.
+Who mints the session id decides how much bookkeeping a first turn needs. Dev Hub generates
+Claude's up front and passes it as `--session-id`, so the id never changes. Codex assigns its own
+and only reveals it in the stream, so the first turn **rekeys** the store, the event buffer and the
+open tab from a `pending:` placeholder to the real id once it appears.
 
 `--print` is in that argv for the record, not as a fix. The CLI's help says the stream-json flags
 "only work with `--print`", but `-p` is only one way into non-interactive mode — its own help adds
@@ -963,6 +965,7 @@ notification offers **Log in** (at most once a minute).
 | `devhub.removeProject` | Remove Project |  |
 | `devhub.switchClaudeAccount` | Switch Claude Account (project right-click, status bar; on the phone: Project sheet → ⇄ Claude account…) |  |
 | `devhub.newClaudeChat` | New Claude Chat |  |
+| `devhub.newCodexChat` | New Codex Chat |  |
 | `devhub.openChat` | Open Chat |  |
 | `devhub.refreshHistory` | Refresh History |  |
 | `devhub.stopSession` | Stop Running Session |  |
@@ -996,13 +999,14 @@ notification offers **Log in** (at most once a minute).
 | `devhub.plannerStopRun` | Stop Task Run |  |
 | `devhub.copyJiraKey` | Copy Task Key |  |
 | `devhub.openMobileApp` | Open Mobile Web App |  |
-| `devhub.updateCli` | Update Claude CLI |  |
+| `devhub.updateCli` | Update Claude / Codex CLI |  |
 
 ## Settings
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `devHub.claude.executable` | `"claude"` | Binary name or absolute path; must be on VS Code's `PATH` |
+| `devHub.codex.executable` | `"codex"` | Same, for Codex |
 | `devHub.claude.altAccountFile` | `""` | Roots (one path per line) that run on a second Claude account. Dev Hub only edits the file; the wrapper in `claude.executable` reads it against `pwd -P` and picks the token. Switching marks the project's live processes, which respawn with `--resume` on their next turn — same path as a model change |
 | `devHub.claude.altAccountName` / `devHub.claude.defaultAccountName` | `"Alt"` / `"Default"` | Labels on the status bar account button |
 | `devHub.maxConcurrentTurns` | `4` | Ceiling on turns running at once across every session |
@@ -1013,6 +1017,12 @@ notification offers **Log in** (at most once a minute).
 | `devHub.claude.models` | `["opus", "sonnet", "haiku", "fa…` | Choices offered in the Claude model picker |
 | `devHub.claude.appendSystemPrompt` | one-line preamble request | Appended to Claude's system prompt (`--append-system-prompt`); empty leaves it untouched |
 | `devHub.claude.sessionIdleMinutes` | `30` | Close an idle Claude session's process after this many minutes |
+| `devHub.codex.model` | `"gpt-6-luna"` | Default Codex model for **new** chats (an existing session keeps what it was set to) |
+| `devHub.codex.effort` | `"max"` | Default Codex reasoning effort for new chats |
+| `devHub.codex.models` | `["gpt-6-astra", "gpt-6-sol", …` | Fallback list for the Codex model picker |
+| `devHub.codex.sandbox` | `"workspace-write"` | Passed to Codex as `-c sandbox_mode`; `codex exec` defaults to `read-only` |
+| `devHub.codex.writableRoots` | `[]` | Extra absolute paths Codex may write to, passed as `-c sandbox_workspace_write.writable_roots` |
+| `devHub.codex.developerInstructions` | `""` | Extra developer instructions for Codex (`-c developer_instructions=…`) |
 | `devHub.claude.promptCacheTtl` | `""` | Optional vendor prompt-cache TTL (`5m` or `1h`); empty inherits Claude Code's default and is separate from the process idle timeout |
 | `devHub.agents` | `[]` | Long-running terminal bots shown under **Agents** |
 | `devHub.planner.endpoint` | `"http://127.0.0.1:7341"` | Loopback API used for an `http` agent's chat turns; a per-agent `endpoint` overrides it |
@@ -1021,7 +1031,7 @@ notification offers **Log in** (at most once a minute).
 | `devHub.claude.artifacts` | `true` | Spawn the CLI with `CLAUDE_CODE_ARTIFACT=1` so a chat here can publish artifacts |
 | `devHub.notify` | `"background"` | Notify when a turn finishes or a tool needs approval |
 | `devHub.agentNames` | `{}` | Friendly names for the raw Slack ids an agent thread reports, e |
-| `devHub.cliUpdateCheck` | `true` | Warn in the status bar when the installed `claude` is behind npm |
+| `devHub.cliUpdateCheck` | `true` | Warn in the status bar when the installed `claude`/`codex` is behind npm |
 
 `devHub.agents` and `devHub.claude.executable` are **machine-scoped**: they name commands this
 machine runs, so a repo's `.vscode/settings.json` cannot supply them. Dev Hub also declares no
@@ -1030,7 +1040,59 @@ support for untrusted workspaces — it spawns CLIs, so there is nothing useful 
 Model lists live in settings because new models ship faster than this extension
 gets rebuilt. Neither applies to a task agent: the daemon picks its own model and Dev Hub sends it
 no options at all. Effort levels stay in code — they are fixed CLI flags: Claude takes
-`low|medium|high|xhigh|max`.
+`low|medium|high|xhigh|max`, while Codex levels are **per model**, read from `codex debug models`
+(falling back to `~/.codex/models_cache.json`), where newer models reach `max` and `ultra` and older
+ones stop at `xhigh`.
+
+### Codex writes files only if you let it
+
+`codex exec` runs with `--sandbox read-only` and approval policy `never`. That combination is
+silent: the agent reads the repo fine, every write is refused, and it cannot ask to escalate, so
+it reports being "locked read-only". `devHub.codex.sandbox` defaults to `workspace-write` so
+Codex behaves like Claude does here — it edits the project folder **without an approval prompt**,
+because this panel has no approval UI for Codex. Set `read-only` for analysis only. The flag is
+passed as `-c sandbox_mode=…` rather than `-s`, because `codex exec resume` has no `-s/--sandbox`.
+
+**`codex exec` cannot be made to ask.** It forces `approval_policy: never` — measured on CLI
+0.154.0, passing `-c approval_policy="on-request"` explicitly still records `never` in the turn's
+`turn_context`, and `~/.codex/config.toml` saying `on-request` is ignored the same way. So the
+sandbox here is all-or-nothing per operation: whatever it blocks simply fails, with the agent
+reading an `Operation not permitted` it cannot do anything about. Two consequences worth knowing
+before blaming the model:
+
+- **A nested `codex` dies under `workspace-write`**, because the inner CLI cannot create its
+  app-server socket: `failed to initialize in-process app-server client: Operation not permitted`,
+  preceded by `could not create PATH aliases`. Verified as an A/B on 0.154.0 — same prompt, outer
+  `workspace-write` exits 1, outer `danger-full-access` exits 0. Any agent design that shells out
+  to `codex` from inside a Dev Hub chat needs one of the two escapes below.
+- **Anything written outside the project fails**, `code --install-extension` included (EPERM on
+  `~/.vscode/extensions`), so a chat cannot install its own build.
+
+Claude's spawn settings are the opposite case and stay reload-only: one `ClaudeProvider` owns
+processes that live across turns and carries the slash store and the permission sink, so rebuilding
+it would strand those processes and cut the only channel that answers a permission request — and a
+permission request must always be answered. Changing one now says so with a **Reload Window**
+prompt rather than doing nothing quietly.
+
+Both Codex spawn settings take effect on the **next turn**, not only after a reload: changing
+`sandbox`, `writableRoots`, `developerInstructions` or `executable` rebuilds the Codex provider in
+place. That is worth stating because it used not to — the value was read once at activation, so
+turning the sandbox off and carrying on typing kept running the old policy with nothing said, which
+reads exactly like the sandbox refusing to turn off. A turn already running keeps the flags it was
+spawned with.
+
+`devHub.codex.writableRoots` is the escape that keeps the sandbox: each path is added to the
+workspace-write policy, so `~/.vscode/extensions` lets a chat install a `.vsix` and `~/.codex`
+gives a nested CLI somewhere to put its socket. `~` is expanded here because VS Code settings do
+not; a relative path is dropped rather than resolved, since it would mean a different directory in
+every chat. The alternative is `devHub.codex.sandbox: "danger-full-access"`, which removes the
+wall entirely.
+
+Easy to mistake for the sandbox blocking your command: Codex runs everything through
+`/bin/zsh -lc`, a **login** shell, so anything in your shell startup that the sandbox blocks
+prefixes every command's output — `rvm` calling `ps` is the common one. Harmless, nothing Dev Hub
+can fix, and an agent reads it as its own command failing.
+
 
 ## System prompts
 

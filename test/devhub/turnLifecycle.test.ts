@@ -120,3 +120,17 @@ test('two resumes cannot pile onto the same session',async()=>{
   assert.ok(/already running a turn/.test(String((results.find(r=>r.status==='rejected') as any).reason?.message)));
   await m.cancelAll();
 });
+
+test('a turn cannot slip in while an out-of-band compaction holds the session',async()=>{
+  const m=new SessionManager(await store(),{claude:stubProvider(0)} as any,4);
+  const session:DevHubSession={provider:'claude',nativeSessionId:'held',workspaceId:'w',projectId:'p',
+    cwd:os.tmpdir(),title:'t',status:'done',createdAt:1,updatedAt:1};
+  let release:(()=>void)|undefined;
+  const compacting=m.withSessionLock(session,()=>new Promise<void>(r=>{release=r;}));
+  // Codex compaction takes a minute or more while status stays `done`; without the lock a resume slips in.
+  await assert.rejects(m.resume(session,'slip in'),/already running a turn/);
+  release!();await compacting;
+  const ok=await m.resume(session,'after compaction');
+  assert.equal(ok.status,'running','once compaction ends, resume works again');
+  await m.cancelAll();
+});

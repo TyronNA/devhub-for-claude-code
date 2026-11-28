@@ -6,13 +6,13 @@ import { ProcessRunner } from './processRunner';
  * goes out to the Internet besides planner/mobile (both loopback/LAN), so it must stay silent on failure:
  * every network error, timeout or odd output returns undefined instead of surfacing in the UI.
  */
-export const CLI_PACKAGES:{[provider:string]:string}={claude:'@anthropic-ai/claude-code'};
+export const CLI_PACKAGES:{[provider:string]:string}={claude:'@anthropic-ai/claude-code',codex:'@openai/codex'};
 export const CHECK_INTERVAL_MS=6*60*60*1000;
 
 export interface VersionDrift { provider:string; installed:string; latest:string; pkg:string }
 export interface VersionCacheEntry { at:number; latest?:string }
 
-/** `claude --version` → "2.1.266 (Claude Code)",
+/** `claude --version` → "2.1.266 (Claude Code)", `codex --version` → "codex-cli 0.153.4",
  *  and also the `v1.2.3` form — the `v` prefix is glued to the number so it is allowed separately. */
 export function parseCliVersion(text:string):string|undefined{
   const m=/(?:^|[^\w.])v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?![\w.])/.exec(String(text||''));

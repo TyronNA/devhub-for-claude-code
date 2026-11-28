@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Measures CPU/heap of the work the extension host actually does, over the real ~/.claude.
+// Measures CPU/heap of the work the extension host actually does, over the real ~/.claude and ~/.codex.
 //   node scripts/measure-host.js
 // Needs `npm run compile` first. Runs outside VS Code so the numbers don't mix with other extensions:
 // the extension host is a process SHARED by every extension, so its RSS can't be attributed to one.
@@ -9,6 +9,7 @@ const D = path.join(REPO, 'dist/src/devhub');
 
 const { ProcessRunner } = require(path.join(D, 'providers/processRunner'));
 const { ClaudeProvider } = require(path.join(D, 'providers/claude/claudeProvider'));
+const { CodexProvider } = require(path.join(D, 'providers/codex/codexProvider'));
 const { reconcileImportedSessions } = require(path.join(D, 'sessions/historyReconciler'));
 const { buildTreeModel } = require(path.join(D, 'views/treeModel'));
 
@@ -40,14 +41,17 @@ async function timed(label, fn) {
     createdAt: 1, updatedAt: 1 }];
   const runner = new ProcessRunner();
   const claude = new ClaudeProvider(runner, 'claude', 1500);
+  const codex = new CodexProvider(runner, 'codex', 1500);
 
   console.log(`node ${process.version} · baseline rss=${mb(process.memoryUsage().rss)}MB\n`);
 
   const c1 = await timed('discoverHistory claude (run 1)', () => claude.discoverHistory(projects));
+  const x1 = await timed('discoverHistory codex  (run 1)', () => codex.discoverHistory(projects));
   await timed('discoverHistory claude (cache)', () => claude.discoverHistory(projects));
+  await timed('discoverHistory codex  (cache)', () => codex.discoverHistory(projects));
 
-  const all = c1;
-  console.log(`\nscanned ${all.length} session claude\n`);
+  const all = [...c1, ...x1];
+  console.log(`\nscanned ${c1.length} claude + ${x1.length} codex sessions = ${all.length}\n`);
 
   await timed('reconcile 0 -> N', () => reconcileImportedSessions([], all));
   await timed('buildTreeModel', () =>
@@ -55,7 +59,7 @@ async function timed(label, fn) {
 
   // The largest transcript: the heaviest path when opening a tab.
   const biggest = [];
-  for (const [p, list] of [[claude, c1]]) {
+  for (const [p, list] of [[claude, c1], [codex, x1]]) {
     let worst, size = 0;
     for (const s of list.slice(0, 400)) {
       try { const f = await p.loadTranscript(s); if (f.length > size) { size = f.length; worst = s; } } catch {}

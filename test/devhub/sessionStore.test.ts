@@ -20,7 +20,7 @@ test('session store bulk upsert imports 1000 sessions in one operation and dedup
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devhub-sessions-bulk-'));
   const store = new SessionStore(dir);
   const sessions = Array.from({length:1000}, (_,i) => ({
-    provider: 'claude',
+    provider: i % 2 ? 'claude' : 'codex',
     nativeSessionId: `s-${i}`,
     workspaceId: `w-${i%3}`,
     projectId: `p-${i%30}`,
@@ -47,18 +47,6 @@ test('session store caches metadata after first load instead of rereading disk o
   assert.equal((await store.list()).length, 1);
 });
 
-test('legacy codex rows are dropped on load and gone from the file after the next write', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devhub-sessions-legacy-'));
-  const file = path.join(dir, 'devhub', 'sessions.json');
-  const row = (provider:string, id:string) => ({provider, nativeSessionId:id, workspaceId:'w', projectId:'p', cwd:'/tmp', title:id, status:'done', createdAt:1, updatedAt:1});
-  await fs.mkdir(path.dirname(file), {recursive:true});
-  await fs.writeFile(file, JSON.stringify({version:1, sessions:[row('claude','a'), row('codex','b')]}));
-  const store = new SessionStore(dir);
-  assert.deepEqual((await store.list()).map((s:any)=>s.provider), ['claude'], 'Codex was removed: old rows must not show up as dead rows');
-  await store.upsert(row('claude','c') as any);
-  const onDisk = JSON.parse(await fs.readFile(file, 'utf8')).sessions.map((s:any)=>s.provider);
-  assert.equal(onDisk.includes('codex'), false);
-});
 
 test('a hand-set name survives a turn writing back the session it captured before the rename', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devhub-sessions-rename-'));

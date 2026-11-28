@@ -156,7 +156,7 @@ test('Recent rows show only the cleaned title, the repo moves to the tooltip',as
     assert.ok(String(long.label).length<100,'the label must be short, currently '+String(long.label).length);
     const nestedLong=tree.getTreeItem({type:'session',data:s('x'.repeat(200)),project:{name:'p'},workspace:{id:'w'}});
     assert.ok(String(nestedLong.label).length<100,'the title label must be short, currently '+String(nestedLong.label).length);
-    assert.equal(/^Claude/.test(String(nestedLong.label)),false,'the label must not start with the provider name');
+    assert.equal(/^Claude|^Codex/.test(String(nestedLong.label)),false,'the label must not start with the provider name');
   }finally{Module._load=original;}
 });
 

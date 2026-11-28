@@ -28,7 +28,7 @@ export function mergeTranscript(loaded:DevHubEvent[],buffered:DevHubEvent[],hist
     :loaded;
   const live=buffered.slice(Math.min(historyLen,buffered.length));
   // Live events arriving WHILE the transcript was being read are already in the buffer, and the transcript on disk may
-  // already contain that same turn (Claude writes the file while running): cut the history at the time of the first
+  // already contain that same turn (Claude/Codex write the file while running): cut the history at the time of the first
   // live event. NOT for the planner — a plan carries the daemon's timestamp, which may be later than older messages
   // in the tab, and cutting would lose the plan.
   const history=live.length&&dedupe?head.filter(e=>e.timestamp<live[0].timestamp):head;

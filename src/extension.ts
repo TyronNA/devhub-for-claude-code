@@ -6,6 +6,7 @@ import { ProjectResolver } from './devhub/workspace/projectResolver';
 import { WorkspaceService } from './devhub/workspace/workspaceService';
 import { ProcessRunner } from './devhub/providers/processRunner';
 import { ClaudeProvider } from './devhub/providers/claude/claudeProvider';
+import { CodexProvider } from './devhub/providers/codex/codexProvider';
 import { PlannerProvider } from './devhub/providers/planner/plannerProvider';
 import { PlannerWatcher, PlannerReminderPush } from './devhub/providers/planner/plannerWatcher';
 import { normalizeAgents } from './devhub/agents/agentRunner';
@@ -32,7 +33,7 @@ export async function activate(context:any){
   setMediaRoot(vscode.Uri.joinPath(context.extensionUri,'media').fsPath);
   const output=vscode.window.createOutputChannel('Dev Hub');context.subscriptions.push(output);output.appendLine('Dev Hub activating');
   const storageDir=context.globalStorageUri.fsPath;const workspaceStore=new WorkspaceStore(storageDir);const sessionStore=new SessionStore(storageDir);const workspaces=new WorkspaceService(workspaceStore,new ProjectResolver());const runner=new ProcessRunner();const claudeExe=resolveClaudeExecutable(vscode.workspace.getConfiguration('devHub').get('claude.executable','claude'));const cfg=vscode.workspace.getConfiguration('devHub');const maxHistory=cfg.get('history.maxFilesPerProvider',1500);
-  const providers:any={claude:new ClaudeProvider(runner,claudeExe,maxHistory,undefined,cfg.get('claude.permissionMode','')||undefined,cfg.get('claude.appendSystemPrompt','')||undefined,Math.max(0,cfg.get('claude.sessionIdleMinutes',30))*60000,cfg.get('claude.autoCompact','auto')||undefined,cfg.get('claude.mcp','inherit')==='none',cfg.get('claude.artifacts',true),cfg.get('claude.promptCacheTtl','')||undefined),planner:new PlannerProvider(cfg.get('planner.endpoint','')||undefined)};manager=new SessionManager(sessionStore,providers,cfg.get('maxConcurrentTurns',4));
+  const providers:any={claude:new ClaudeProvider(runner,claudeExe,maxHistory,undefined,cfg.get('claude.permissionMode','')||undefined,cfg.get('claude.appendSystemPrompt','')||undefined,Math.max(0,cfg.get('claude.sessionIdleMinutes',30))*60000,cfg.get('claude.autoCompact','auto')||undefined,cfg.get('claude.mcp','inherit')==='none',cfg.get('claude.artifacts',true),cfg.get('claude.promptCacheTtl','')||undefined),codex:new CodexProvider(runner,cfg.get('codex.executable','codex'),maxHistory,undefined,cfg.get('codex.developerInstructions','')||undefined,cfg.get('codex.sandbox','workspace-write'),cfg.get('codex.writableRoots',[])),planner:new PlannerProvider(cfg.get('planner.endpoint','')||undefined)};manager=new SessionManager(sessionStore,providers,cfg.get('maxConcurrentTurns',4));
   const tree=new DevHubTreeProvider(workspaces,sessionStore,{
     get:()=>context.globalState.get('devhub.pinnedPorts',[]) as number[],
     set:(v:number[])=>void context.globalState.update('devhub.pinnedPorts',v)},
@@ -63,15 +64,28 @@ export async function activate(context:any){
     vscode.window[r.level==='error'?'showErrorMessage':r.level==='warn'?'showWarningMessage':'showInformationMessage'](`Dev Hub: ${r.message}`);
   }));
   const cliUpdate=new CliUpdateStatus(runner,
-    ()=>{const c=vscode.workspace.getConfiguration('devHub');return {claude:resolveClaudeExecutable(c.get('claude.executable','claude'))};},
+    ()=>{const c=vscode.workspace.getConfiguration('devHub');return {claude:resolveClaudeExecutable(c.get('claude.executable','claude')),codex:c.get('codex.executable','codex')};},
     {get:()=>context.globalState.get('devhub.cliVersionCache',{}),set:(v:any)=>void context.globalState.update('devhub.cliVersionCache',v)},
     ()=>vscode.workspace.getConfiguration('devHub').get('cliUpdateCheck',true));
   context.subscriptions.push(cliUpdate);
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e:any)=>{
-    if(e.affectsConfiguration('devHub.cliUpdateCheck')||e.affectsConfiguration('devHub.claude.executable'))void cliUpdate.refresh();
+    if(e.affectsConfiguration('devHub.cliUpdateCheck')||e.affectsConfiguration('devHub.claude.executable')||e.affectsConfiguration('devHub.codex.executable'))void cliUpdate.refresh();
   }));
   /**
-   * Claude's spawn flags CANNOT be hot-swapped: a ClaudeProvider keeps processes alive across
+   * Codex's spawn flags are read ONCE at activate, so changing `sandbox` and typing on keeps the old
+   * value until a window reload — silently, and it looks exactly like the sandbox refusing to turn off.
+   * Every caller looks up `providers[<id>]` at call time, so replacing the `codex` slot makes the next
+   * turn use the new flags; a running turn holds its own handle and is not touched.
+   */
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e:any)=>{
+    if(!['devHub.codex.sandbox','devHub.codex.writableRoots','devHub.codex.developerInstructions','devHub.codex.executable']
+      .some(k=>e.affectsConfiguration(k)))return;
+    const c=vscode.workspace.getConfiguration('devHub');
+    providers.codex=new CodexProvider(runner,c.get('codex.executable','codex'),maxHistory,undefined,
+      c.get('codex.developerInstructions','')||undefined,c.get('codex.sandbox','workspace-write'),c.get('codex.writableRoots',[]));
+  }));
+  /**
+   * Unlike Codex, Claude's spawn flags CANNOT be hot-swapped: a ClaudeProvider keeps processes alive across
    * turns, and it also has the slash store + permission sink attached below — rebuilding it abandons those processes
    * and cuts the permission reply path, and a permission request MUST be answered.
    * So just tell the truth here: it needs a reload. Silence is what cost the user a whole morning.
@@ -86,7 +100,7 @@ export async function activate(context:any){
   }));
   context.subscriptions.push(vscode.commands.registerCommand('devhub.updateCli',async()=>{
     const drifts=cliUpdate.current();
-    if(!drifts.length)return void vscode.window.showInformationMessage('Dev Hub: Claude CLI is up to date.');
+    if(!drifts.length)return void vscode.window.showInformationMessage('Dev Hub: Claude and Codex CLIs are up to date.');
     // Don't run npm automatically: a global install may ask for permissions, and the user must see the command before it runs.
     const pick=drifts.length===1?drifts[0]:(await vscode.window.showQuickPick(
       drifts.map(d=>({label:d.provider,description:`${d.installed} \u2192 ${d.latest}`,drift:d})),
@@ -231,7 +245,7 @@ export async function activate(context:any){
     const conf=vscode.workspace.getConfiguration('devHub');
     if(!conf.get('mobile.enabled',false)){
       const pick=await vscode.window.showWarningMessage(
-        'The Dev Hub mobile web app serves this machine\'s Claude sessions over HTTP on your local network. Anyone on this Wi-Fi holding the URL can start and steer agents here.',
+        'The Dev Hub mobile web app serves this machine\'s Claude/Codex sessions over HTTP on your local network. Anyone on this Wi-Fi holding the URL can start and steer agents here.',
         {modal:true},'Enable');
       if(pick!=='Enable')return;
       await conf.update('mobile.enabled',true,vscode.ConfigurationTarget.Global);

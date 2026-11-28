@@ -40,6 +40,12 @@ claude --version                                 # prints a version when it work
 If you installed it somewhere unusual, put its full path in the `devHub.claude.executable` setting.
 </details>
 
+**Codex too, optionally.** With the [Codex CLI](https://developers.openai.com/codex/cli) installed and
+signed in, **Dev Hub: New Codex Chat** opens a Codex chat in the same panel and phone page. It
+edits the project folder without asking (`devHub.codex.sandbox` = `workspace-write`, because
+`codex exec` cannot show approval prompts); set it to `read-only` for analysis only. Codex is a
+trademark of OpenAI; Dev Hub is not affiliated with OpenAI either.
+
 ## How it works
 
 <picture>
@@ -80,6 +86,7 @@ panel, set `devHub.claude.permissionMode` to `"manual"`. See
 |---|---|---|
 | `devHub.claude.executable` | `claude` | Path to the CLI if it is not on `PATH` |
 | `devHub.claude.permissionMode` | `""` | `""` inherit, `manual`, `plan`, or `bypassPermissions` |
+| `devHub.codex.sandbox` | `workspace-write` | `read-only` keeps Codex from writing files |
 | `devHub.maxConcurrentTurns` | `4` | How many turns may run at once |
 | `devHub.mobile.enabled` | `false` | Serve the phone web app |
 | `devHub.mobile.passcode` | `""` | Passcode for the phone web app |

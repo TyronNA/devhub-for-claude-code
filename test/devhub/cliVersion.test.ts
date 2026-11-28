@@ -4,7 +4,7 @@ import { ProcessRunner } from '../../src/devhub/providers/processRunner';
 
 test('version parsing survives what each CLI actually prints',()=>{
   assert.equal(parseCliVersion('2.1.266 (Claude Code)'),'2.1.266');
-  assert.equal(parseCliVersion('some-cli 0.153.4'),'0.153.4');
+  assert.equal(parseCliVersion('codex-cli 0.153.4'),'0.153.4');
   assert.equal(parseCliVersion('v1.2.3'),'1.2.3');
   assert.equal(parseCliVersion('1.2.3-rc.1'),'1.2.3-rc.1');
   // Nothing that looks like a version means stay quiet, don't guess — a false warning is worse than none.
@@ -39,16 +39,14 @@ function fakeRunner(versions:{[cmd:string]:string|null}){
 }
 function fakeCache(initial:any={}){let v=initial;return {get:()=>v,set:(x:any)=>{v=x;},peek:()=>v};}
 
-test('drift check reports the CLI only when it is actually behind',async()=>{
-  const run=(latest:string)=>checkVersionDrift({
-    runner:fakeRunner({claude:'2.1.261 (Claude Code)'}),
-    executables:{claude:'claude'},cache:fakeCache(),
-    fetchLatest:async(pkg:string)=>pkg===CLI_PACKAGES.claude?latest:undefined});
-  const drifts=await run('2.1.266');
+test('drift check reports only the CLI that is actually behind',async()=>{
+  const drifts=await checkVersionDrift({
+    runner:fakeRunner({claude:'2.1.261 (Claude Code)',codex:'codex-cli 0.153.4'}),
+    executables:{claude:'claude',codex:'codex'},cache:fakeCache(),
+    fetchLatest:async(pkg:string)=>pkg===CLI_PACKAGES.claude?'2.1.266':'0.153.4'});
   assert.deepEqual(drifts.map(d=>d.provider),['claude']);
   assert.equal(drifts[0].installed,'2.1.261');assert.equal(drifts[0].latest,'2.1.266');
   assert.equal(drifts[0].pkg,'@anthropic-ai/claude-code');
-  assert.deepEqual(await run('2.1.261'),[],'same version does not warn');
 });
 
 test('registry is hit once per interval, not once per refresh',async()=>{

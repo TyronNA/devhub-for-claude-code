@@ -1,8 +1,8 @@
 {
   "name": "dev-hub-claude-codex",
   "displayName": "Dev Hub for Claude Code",
-  "description": "Run Claude Code sessions across many repos from one VS Code window, plus a phone-friendly web page for the same chats. Unofficial; not affiliated with Anthropic.",
-  "version": "0.29.78",
+  "description": "Run Claude Code (and optionally Codex) sessions across many repos from one VS Code window, plus a phone-friendly web page for the same chats. Unofficial; not affiliated with Anthropic.",
+  "version": "0.29.79",
   "publisher": "tyronna",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -40,7 +40,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "Dev Hub spawns the Claude CLI and runs agent commands from settings."
+      "description": "Dev Hub spawns the Claude and Codex CLIs and runs agent commands from settings."
     }
   },
   "activationEvents": [
@@ -108,6 +108,15 @@
           "dark": "media/claude-dark.svg"
         },
         "shortTitle": "New Claude Chat"
+      },
+      {
+        "command": "devhub.newCodexChat",
+        "title": "Dev Hub: New Codex Chat",
+        "icon": {
+          "light": "media/codex-light.svg",
+          "dark": "media/codex-dark.svg"
+        },
+        "shortTitle": "New Codex Chat"
       },
       {
         "command": "devhub.openMobileApp",
@@ -314,7 +323,7 @@
       },
       {
         "command": "devhub.updateCli",
-        "title": "Dev Hub: Update Claude CLI",
+        "title": "Dev Hub: Update Claude / Codex CLI",
         "shortTitle": "Update CLI"
       }
     ],
@@ -331,7 +340,7 @@
       "devHub": [
         {
           "id": "devHub.sessions",
-          "name": "Claude Sessions"
+          "name": "Claude & Codex Sessions"
         }
       ]
     },
@@ -365,6 +374,11 @@
           "group": "inline@1"
         },
         {
+          "command": "devhub.newCodexChat",
+          "when": "view == devHub.sessions && viewItem == devhubProject",
+          "group": "inline@2"
+        },
+        {
           "command": "devhub.renameWorkspace",
           "when": "view == devHub.sessions && viewItem == devhubWorkspace",
           "group": "devhub@1"
@@ -393,6 +407,11 @@
           "command": "devhub.newClaudeChat",
           "when": "view == devHub.sessions && viewItem == devhubWorkspace",
           "group": "devhub@1"
+        },
+        {
+          "command": "devhub.newCodexChat",
+          "when": "view == devHub.sessions && viewItem == devhubWorkspace",
+          "group": "devhub@2"
         },
         {
           "command": "devhub.revealProject",
@@ -526,6 +545,12 @@
           "default": "Default",
           "description": "Label for the account used everywhere else."
         },
+        "devHub.codex.executable": {
+          "scope": "machine",
+          "type": "string",
+          "default": "codex",
+          "description": "Codex CLI executable."
+        },
         "devHub.maxConcurrentTurns": {
           "type": "number",
           "default": 4,
@@ -583,11 +608,54 @@
           ],
           "markdownDescription": "Choices offered in the Claude model picker. Edit this instead of waiting for an extension update when new models ship."
         },
+        "devHub.codex.model": {
+          "type": "string",
+          "default": "gpt-6-luna",
+          "markdownDescription": "Default Codex model for new chats. Empty = use `model` from `~/.codex/config.toml`."
+        },
+        "devHub.codex.effort": {
+          "type": "string",
+          "default": "max",
+          "markdownDescription": "Default Codex reasoning effort. The picker offers what the selected model actually supports, read from `codex debug models` (falling back to `~/.codex/models_cache.json`); newer models add `max` and `ultra`.",
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        },
+        "devHub.codex.models": {
+          "type": "array",
+          "default": [
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-pro",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex",
+            "gpt-5.2-codex"
+          ],
+          "markdownDescription": "Fallback list for the Codex model picker. Normally unused — the picker reads the live catalog from `codex debug models`, then `~/.codex/models_cache.json`. Only consulted when neither is available."
+        },
         "devHub.claude.appendSystemPrompt": {
           "scope": "machine",
           "type": "string",
           "default": "Before starting a group of tool calls, say in one short line what you are about to do. Keep it to one line, skip it for a single trivial call, and do not restate it afterwards.",
           "markdownDescription": "Extra instructions appended to Claude's system prompt (`--append-system-prompt`). Applies to every Dev Hub turn, including resumes. The default asks for a one-line preamble before each group of tool calls — Claude's reasoning is redacted by the API, so without it a turn is silent between tool rows. On Opus 5.5 that preamble arrives as a `thinking` block with text, which Dev Hub renders as a normal message. Set to empty to leave the system prompt untouched."
+        },
+        "devHub.codex.developerInstructions": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Extra developer instructions for Codex (`-c developer_instructions=…`). Empty = untouched. Codex has no `--append-system-prompt`; this is the nearest equivalent."
         },
         "devHub.claude.sessionIdleMinutes": {
           "type": "number",
@@ -680,6 +748,25 @@
           "default": 39642,
           "markdownDescription": "Port for the mobile web app, served on the LAN. Fixed by default so the URL survives a **Developer: Reload Window** and a phone's bookmark or home-screen app keeps opening the same page. Change it only on a clash — a second window serving the page fails with `EADDRINUSE` instead of drifting. `0` goes back to picking a free port on each activation, which breaks any saved URL."
         },
+        "devHub.codex.sandbox": {
+          "scope": "machine",
+          "type": "string",
+          "enum": [
+            "",
+            "read-only",
+            "workspace-write",
+            "danger-full-access"
+          ],
+          "default": "workspace-write",
+          "markdownDescription": "Passed to Codex as `-c sandbox_mode`. **`codex exec` defaults to `read-only` with approval policy `never`** — without this setting Codex can read your repo but every write is refused and it cannot ask you to escalate. `workspace-write` (default) lets it edit the project folder and temp dirs, with **no approval prompt** — this panel has no approval UI for Codex. `read-only` for analysis only. Empty inherits `sandbox_mode` from `~/.codex/config.toml`. `danger-full-access` disables the sandbox — sandboxed machines only. To open one path without giving up the sandbox, see `#devHub.codex.writableRoots#`."
+        },
+        "devHub.codex.writableRoots": {
+          "scope": "machine",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Extra absolute paths Codex may write to, passed as `-c sandbox_workspace_write.writable_roots`. Only meaningful while `#devHub.codex.sandbox#` is `workspace-write`. **`codex exec` forces `approval_policy: never`** — measured on CLI 0.154.0, passing `on-request` explicitly is still recorded as `never` — so anything the sandbox blocks simply fails and Codex cannot ask you to escalate. This is the way to open one door without turning the sandbox off: `~/.vscode/extensions` to let a chat install a `.vsix`, `~/.codex` so a nested `codex` can create its app-server socket. `~` is expanded; relative paths are ignored because they would resolve against each chat's own project."
+        },
         "devHub.planner.endpoint": {
           "scope": "machine",
           "type": "string",
@@ -695,7 +782,7 @@
         "devHub.cliUpdateCheck": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Check `registry.npmjs.org` (once every 6 hours) whether the installed `claude` CLI is behind the published version, and show a status bar hint when it is. This is the only outbound request Dev Hub makes; turn it off to keep the extension fully offline."
+          "markdownDescription": "Check `registry.npmjs.org` (once every 6 hours) whether the installed `claude`/`codex` CLI is behind the published version, and show a status bar hint when it is. This is the only outbound request Dev Hub makes; turn it off to keep the extension fully offline."
         }
       }
     },

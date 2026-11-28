@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.29.79 — Codex is back
+
+- **Codex chats return**, undoing the 0.29.72 removal: **Dev Hub: New Codex Chat**, the Codex
+  provider (`codex exec --json` per turn, compaction over `codex app-server`, model catalog from
+  `codex debug models`), its history in the sidebar, the phone page and the seven
+  `devHub.codex.*` settings. Codex stays optional; without the CLI nothing changes for Claude.
+- Old Codex rows in `sessions.json` are no longer filtered on load. Rows the 0.29.72 filter already
+  dropped come back from `~/.codex` on the next history scan.
+- The Codex icon is an original mark, not the OpenAI logo; every restored comment and string is English.
+- The Codex model-picker test now points `CODEX_HOME` at an empty folder; it used to read the
+  machine's own `~/.codex/models_cache.json`.
+- Proven: `tsc` clean; 487/487 unit tests incl. the restored Codex suites (transport, parsers,
+  catalog, parity). Against a real `codex-cli 0.172.0`, `CodexProvider` ran a start turn, a resume
+  on the same thread and a transcript reload: assistant text, usage, quota and `turn_done` all
+  parsed. **Not opened in a real window**; compaction, images and sub-agents were not exercised live.
+
 ## 0.29.78 — Marketplace publisher
 
 - **Publisher is now `tyronna`**, so the extension id becomes `tyronna.dev-hub-claude-codex`, ready for

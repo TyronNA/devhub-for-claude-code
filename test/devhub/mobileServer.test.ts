@@ -37,21 +37,21 @@ async function withServer(fn:(ctx:any)=>Promise<void>,bindLan=true,customize?:(c
     cancel:async()=>{},updateUsage:async(s:any,u:any)=>({...s,usage:{...s.usage,...u}}),withSessionLock:async(_s:any,f:any)=>f(),
     setTurnOptions:async(s:any,o:any)=>{calls.turnOptions={id:s.nativeSessionId,...o};return {...s,...o};},
   };
-  const plannerSession:any={...session,provider:'planner',nativeSessionId:'c1',title:'planner chat'};
+  const codexSession:any={...session,provider:'codex',nativeSessionId:'c1',title:'codex chat'};
   let transcript:any[]=[{type:'assistant_message',text:'old turn',timestamp:1}];
   const providers:any={
     claude:{id:'claude',loadTranscript:async()=>transcript,slashCommands:()=>['compact','review']},
-    planner:{id:'planner',loadTranscript:async()=>[]}};
+    codex:{id:'codex',loadTranscript:async()=>[]}};
   const storageDir=nodeFs.mkdtempSync(nodePathT.join(nodeOs.tmpdir(),'devhub-mobile-'));
   const answered:any[]=[];
   const deps:any={manager,providers,passcode:()=>PASSCODE,
     lookup:async()=>({workspaces:[{id:'w1',name:'WS',createdAt:1,updatedAt:1}],
                       projects:[{id:'p1',workspaceId:'w1',name:'proj',rootPath:'/tmp',createdAt:1,updatedAt:1}]}),
     listSessions:async()=>[session],
-    findSession:async(_p:string,id:string)=>(id==='s1'?session:id==='c1'?plannerSession:undefined),
+    findSession:async(_p:string,id:string)=>(id==='s1'?session:id==='c1'?codexSession:undefined),
     answerPermission:(...a:any[])=>answered.push(a),
     storageDir};
-  customize?.({deps,manager,session,plannerSession,em,calls});
+  customize?.({deps,manager,session,codexSession,em,calls});
   const srv=new MobileServer(deps);
   const {port,token}=await srv.start(0,bindLan);
   const base=`http://127.0.0.1:${port}`;
@@ -293,20 +293,22 @@ test('a draft started from a project becomes a real session',async()=>{
 });
 
 test('a mobile draft keeps the real session id when startup rekeys before start returns',async()=>{
-  const real:any={provider:'claude',nativeSessionId:'real-id',workspaceId:'w1',projectId:'p1',cwd:'/tmp',
+  const real:any={provider:'codex',nativeSessionId:'real-id',workspaceId:'w1',projectId:'p1',cwd:'/tmp',
     title:'hello',status:'running',createdAt:1,updatedAt:Date.now()};
   await withServer(async({base,headers})=>{
     const s=await stream(base,headers);
     await s.post({type:'openProject',projectId:'p1'});
     await s.wait((m:any)=>m.type==='draftSelected');
+    await s.post({type:'setProvider',provider:'codex'});
+    await s.wait((m:any)=>m.type==='draftSelected'&&m.draft.provider==='codex');
     await s.post({type:'sendPrompt',text:'hello'});
-    const selected=await s.wait((m:any)=>m.type==='sessionSelected'&&m.session.nativeSessionId!=='s1');
+    const selected=await s.wait((m:any)=>m.type==='sessionSelected'&&m.session.provider==='codex');
     assert.equal(selected.session.nativeSessionId,'real-id');
     s.cancel();
   },true,({deps,manager,em}:any)=>{
     deps.findSession=async(_provider:string,id:string)=>id==='real-id'?real:undefined;
     manager.start=async(input:any)=>{
-      em.emit('sessionRekeyed',{provider:'claude',oldId:'pending:turn',newId:'real-id',session:real});
+      em.emit('sessionRekeyed',{provider:'codex',oldId:'pending:turn',newId:'real-id',session:real});
       return {...real,nativeSessionId:'pending:turn',title:input.prompt};
     };
   });
@@ -445,10 +447,10 @@ test('switching to the other provider drops options that only mean something to 
     await s.wait((m:any)=>m.type==='sessionSelected');
     await s.post({type:'setOption',kind:'model',value:'opus'});
     await s.wait((m:any)=>m.type==='optionsChanged'&&m.model==='opus');
-    // `opus` is not a planner model; carrying it over breaks the whole turn.
-    await s.post({type:'openSession',provider:'planner',id:'c1'});
-    await s.wait((m:any)=>m.type==='sessionSelected'&&m.session.provider==='planner');
-    const opt=await s.wait((m:any)=>m.type==='optionsChanged'&&m.provider==='planner');
+    // `opus` is not a Codex model; carrying it over breaks the whole turn.
+    await s.post({type:'openSession',provider:'codex',id:'c1'});
+    await s.wait((m:any)=>m.type==='sessionSelected'&&m.session.provider==='codex');
+    const opt=await s.wait((m:any)=>m.type==='optionsChanged'&&m.provider==='codex');
     assert.equal(opt.model,undefined,'the model must reset to the new provider\'s default');
     s.cancel();
   });
@@ -497,14 +499,14 @@ test('the bridge waits for the server to confirm the session before flushing its
 test('the bridge remembers the project with the selected session',()=>{
   const b=bootBridge(PROJECT_STATE(1));
   b.socket.onmessage({data:JSON.stringify({type:'sessionSelected',
-    session:{provider:'claude',nativeSessionId:'real-id'},project:{id:'p0'}})});
-  assert.deepEqual(JSON.parse(b.storage.value),{provider:'claude',id:'real-id',projectId:'p0'});
+    session:{provider:'codex',nativeSessionId:'real-id'},project:{id:'p0'}})});
+  assert.deepEqual(JSON.parse(b.storage.value),{provider:'codex',id:'real-id',projectId:'p0'});
 });
 
 test('a gone restored session falls back to its remembered project',async()=>{
-  const b=bootBridge(PROJECT_STATE(1),{provider:'claude',id:'stale-id',projectId:'p0'});
+  const b=bootBridge(PROJECT_STATE(1),{provider:'codex',id:'stale-id',projectId:'p0'});
   assert.deepEqual(b.posted.map((m:any)=>({type:m.type,provider:m.provider,id:m.id})),
-    [{type:'openSession',provider:'claude',id:'stale-id'}]);
+    [{type:'openSession',provider:'codex',id:'stale-id'}]);
   b.socket.onmessage({data:JSON.stringify({type:'error',message:'That session is gone.'})});
   await flush();
   assert.deepEqual(b.posted.map((m:any)=>({type:m.type,projectId:m.projectId})),

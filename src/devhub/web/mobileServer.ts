@@ -1,3 +1,4 @@
+import { codexSnapshot } from '../providers/codex/codexHistoryParser';
 const http=require('node:http');
 const crypto=require('node:crypto');
 const fsp=require('node:fs/promises');
@@ -9,10 +10,12 @@ import { AgentProvider } from '../providers/provider';
 import { coalesceSessionDeltas, EventBatcher } from '../ui/eventBatcher';
 import { SessionEventCache } from '../sessions/sessionEventCache';
 import { mergeTranscript, rereadsTranscript } from '../sessions/transcriptMerge';
+import { codexImageRoot } from '../providers/codex/codexEventParser';
 import { recoverImages } from '../providers/claude/claudeProvider';
 import { toolImageDir } from '../providers/claude/claudeEventParser';
 import { chatBodyMarkup, webviewAssets, optionChoices, defaultTurnOptions, foreignAttachment } from '../views/chatPanelProvider';
 import { GitStatusWatcher } from '../workspace/gitStatusWatcher';
+import { codexHistorySnapshot } from '../providers/codex/codexHistoryParser';
 import { parseMobileMessage } from './mobileProtocol';
 import { localMediaRoots, MEDIA_MIME } from '../views/localMedia';
 import { providerLabel } from '../ui/format';
@@ -66,7 +69,7 @@ const COOKIE='devhub_mobile';
  * CSP at all, i.e. the second front-end lacked every defence of the first. Everything it loads
  * is same-origin (`/assets/*`, `/api/file`, EventSource `/api/stream`, fetch `/api/*`) so
  * `'self'` is enough — NO `'unsafe-inline'` needed: the markup has no `style=` and the css has no
- * `url()`. `data:` is only opened for images.
+ * `url()`. `data:` is only opened for images, because images pasted into a Codex rollout only have data URIs.
  */
 const CSP="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; "
   +"connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -329,8 +332,8 @@ export class MobileServer {
   private text(res:any,body:string,type:string){
     res.writeHead(200,{'Content-Type':`${type}; charset=utf-8`,'Cache-Control':'no-store'});res.end(body);
   }
-  /** Images the user attached and media the agent mentions (`localMediaRoots`). */
-  private imageRoots(){return [this.attachmentDir(),...localMediaRoots()].flatMap(r=>{const raw=nodePath.resolve(r);try{return [raw,fsSync.realpathSync(r)];}catch{return [raw];}});}
+  /** Images Codex generates, images the user attached, and media the agent mentions (`localMediaRoots`). */
+  private imageRoots(){return [codexImageRoot(),this.attachmentDir(),...localMediaRoots()].flatMap(r=>{const raw=nodePath.resolve(r);try{return [raw,fsSync.realpathSync(r)];}catch{return [raw];}});}
   /** `p` = base64url (bridge, attached images); `f` = a raw path (media in replies, joined by chat.js). */
   private serveFile(req:any,res:any,q:any){
     let p=q.get('f')||'';
@@ -561,7 +564,7 @@ export class MobileServer {
       const list:string[]=adapter?.slashCommands?.(client?.session?.nativeSessionId)||[];
       return {items:list.map(c=>({label:'/'+c,value:'/'+c+' '}))};
     }
-    if(kind==='provider')return {items:[{label:'Claude',value:'claude'}]};
+    if(kind==='provider')return {items:[{label:'Claude',value:'claude'},{label:'Codex',value:'codex'}]};
     return {items:[]};
   }
 
@@ -592,6 +595,13 @@ export class MobileServer {
         events=reread?this.buffers.get(key)??[]:[];
         this.post(client,{type:'error',message:`Transcript unavailable: ${e?.message||e}`});
       }
+    }
+    if(session.provider==='codex'){
+      const usage=codexSnapshot(events||[]);
+      if(Object.entries(usage).some(([key,value])=>value!==(client.session?.usage as any)?.[key]))
+        client.session=await this.deps.manager.updateUsage(client.session!,usage);
+      if(!(this.deps.manager.isBusy?.(session.provider,session.nativeSessionId)??false)&&this.deps.manager.restoreHistoricalUsage)
+        client.session=await this.deps.manager.restoreHistoricalUsage(client.session!,codexHistorySnapshot(events||[]));
     }
     if(client.shown?.key!==key)client.shown={key,n:MOBILE_PAGE};
     const all=events||[],tail=all.slice(-client.shown.n);
@@ -631,7 +641,7 @@ export class MobileServer {
 
   /** Images travel in events as PATHS; only when sending are they turned into this server's URLs. */
   private forWeb(event:any){
-    // A data URI has no file for `/api/file` to point at.
+    // Images pasted into a Codex rollout only exist as data URIs — no file for `/api/file` to point at.
     const uri=(p:string)=>String(p).startsWith('data:')?String(p):`/api/file?p=${Buffer.from(String(p),'utf8').toString('base64url')}`;
     if(event?.type==='assistant_image'&&event.path)return {...event,src:uri(event.path)};
     if(event?.type==='user_message'&&event.images?.length)return {...event,imageSrcs:event.images.map(uri)};
@@ -779,7 +789,7 @@ export class MobileServer {
     finally { client.starting=false; }
   }
 
-  /** Claude compacts with a real slash command; the planner has no compaction. */
+  /** Claude compacts with a real slash command; Codex must call the app-server (sending "/compact" is just a prompt); the planner has no compaction. */
   private async compact(client:Client){
     const session=client.session;
     if(!session){this.post(client,{type:'error',message:'Nothing to compact yet — send a message first.'});return;}
@@ -789,7 +799,23 @@ export class MobileServer {
       this.deps.onSelection?.(client.session);
       return;
     }
-    this.post(client,{type:'error',message:`${providerLabel(session.provider)} sessions have no compaction.`});
+    // Like the panel: only Codex goes on, the planner has no compaction to call.
+    if(session.provider!=='codex'){this.post(client,{type:'error',message:`${providerLabel(session.provider)} sessions have no compaction.`});return;}
+    const adapter:any=this.deps.providers.codex;
+    if(!adapter?.compact){this.post(client,{type:'error',message:'Codex compaction is unavailable in this build.'});return;}
+    const emit=(event:DevHubEvent)=>{
+      this.buffers.append(this.sessionKey('codex',session.nativeSessionId),event);
+      for(const c of this.clientsFor('codex',session.nativeSessionId))this.post(c,{type:'event',sessionId:session.nativeSessionId,event});
+    };
+    try{
+      await this.deps.manager.withSessionLock(session,async()=>{
+        let usage:any;
+        await adapter.compact(session,(event:DevHubEvent)=>{
+          if(event.type==='usage')usage={...usage,...event.usage}; else emit(event);
+        });
+        if(usage)await this.deps.manager.updateUsage(session,usage);
+      });
+    }catch(e:any){emit({type:'error',message:`Compact failed: ${e?.message||e}`,timestamp:Date.now()});}
   }
 
   // ---------- attached images ----------

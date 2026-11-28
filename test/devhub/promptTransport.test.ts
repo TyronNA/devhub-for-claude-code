@@ -5,6 +5,7 @@ const os=require('node:os');
 const path=require('node:path');
 import { ProcessRunner } from '../../src/devhub/providers/processRunner';
 import { ClaudeProvider } from '../../src/devhub/providers/claude/claudeProvider';
+import { CodexProvider } from '../../src/devhub/providers/codex/codexProvider';
 import { HistoryScanCache, boundedSet } from '../../src/devhub/providers/historyUtils';
 import { discoverClaudeHistory } from '../../src/devhub/providers/claude/claudeHistory';
 
@@ -28,6 +29,18 @@ process.stdin.on('data',c=>{buf+=c;let i;
 process.stdin.on('end',()=>process.exit(0));`,{mode:0o755});
   return file;
 }
+/** Codex is still one-shot: reads raw stdin to EOF, then prints it. */
+async function echoCliCodex(dump:string){
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devhub-echo-'));const file=path.join(dir,'cli');
+  await fs.writeFile(file,`#!/usr/bin/env node
+const a=process.argv.slice(2);
+let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{
+  require('fs').writeFileSync(${JSON.stringify(dump)},JSON.stringify({argv:a,stdin:s}));
+  console.log(JSON.stringify({type:'thread.started',thread_id:'x'}));
+  console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}));
+});`,{mode:0o755});
+  return file;
+}
 async function drain(h:any){const o=[];for await(const e of h.events)o.push(e);return o;}
 // A resident session keeps the child process alive; the test must close it or node won't exit.
 const live:any[]=[];
@@ -41,6 +54,16 @@ test('Claude prompt travels on stdin and is absent from argv',async()=>{
   const got=JSON.parse(await fs.readFile(dump,'utf8'));
   assert.equal(got.stdin,secret,'the prompt must reach the CLI via stdin');
   assert.equal(got.argv.some((a:string)=>a.includes(secret)),false,'the prompt must NOT be in argv (visible through ps)');
+});
+
+test('Codex prompt travels on stdin using the - marker',async()=>{
+  const dump=path.join(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-d-')),'d.json');
+  const exe=await echoCliCodex(dump);const secret='CODEX-SECRET-e2e';
+  await drain(await new CodexProvider(new ProcessRunner(),exe,10).start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:secret} as any));
+  const got=JSON.parse(await fs.readFile(dump,'utf8'));
+  assert.equal(got.stdin,secret);
+  assert.equal(got.argv.some((a:string)=>a.includes(secret)),false);
+  assert.equal(got.argv.includes('-'),true,'codex needs "-" to read stdin');
 });
 
 test('permissionMode is forwarded only when configured',async()=>{
@@ -97,7 +120,7 @@ test('bounded maps evict oldest entries instead of growing without limit',async(
   assert.equal(c.get('c',{mtimeMs:1,size:1}).hit,true);
 });
 
-test('system prompt setting reaches Claude with its flag',async()=>{
+test('system prompt settings reach each CLI with its own flag',async()=>{
   const d1=path.join(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-d-')),'d.json');
   await drain(await track(new ClaudeProvider(new ProcessRunner(),await echoCli(d1),10,undefined,undefined,'BE TERSE'))
     .start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'x'} as any));
@@ -107,9 +130,27 @@ test('system prompt setting reaches Claude with its flag',async()=>{
   // The append flag turns the snapshot off itself; without turning it back on every old chat changes system prompt on its next resume.
   assert.equal(a[a.indexOf('--system-prompt-snapshot')+1],'on');
 
+  const d2=path.join(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-d-')),'d.json');
+  await drain(await new CodexProvider(new ProcessRunner(),await echoCliCodex(d2),10,undefined,'BE TERSE')
+    .start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'x'} as any));
+  const b=JSON.parse(await fs.readFile(d2,'utf8')).argv;
+  // Codex has no --append-system-prompt; developer_instructions is the closest thing.
+  assert.equal(b.some((x:string)=>x.startsWith('developer_instructions=')),true,'missing developer_instructions: '+b.join(' '));
+  assert.equal(b.some((x:string)=>x==='--append-system-prompt'),false,'Codex does not take Claude\'s flag');
+
   const d3=path.join(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-d-')),'d.json');
   await drain(await track(new ClaudeProvider(new ProcessRunner(),await echoCli(d3),10)).start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'x'} as any));
   const c3=JSON.parse(await fs.readFile(d3,'utf8')).argv;
   assert.equal(c3.includes('--append-system-prompt'),false,'not set means not sent');
   assert.equal(c3.includes('--system-prompt-snapshot'),false,'without append the snapshot stays the CLI default');
+});
+
+test('codex skips the trust gate so Dev Hub can run in any project',async()=>{
+  const d=path.join(await fs.mkdtemp(path.join(os.tmpdir(),'devhub-d-')),'d.json');
+  await drain(await new CodexProvider(new ProcessRunner(),await echoCliCodex(d),10)
+    .start({workspaceId:'w',projectId:'p',cwd:os.tmpdir(),prompt:'x'} as any));
+  const argv=JSON.parse(await fs.readFile(d,'utf8')).argv;
+  // Without this flag, codex refuses to run outside folders trusted in ~/.codex/config.toml.
+  assert.ok(argv.includes('--skip-git-repo-check'),'missing --skip-git-repo-check: '+argv.join(' '));
+  assert.ok(argv.includes('exec')&&argv.includes('--json'));
 });

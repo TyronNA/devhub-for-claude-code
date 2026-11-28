@@ -1,4 +1,4 @@
-export type ProviderId = 'claude' | 'planner';
+export type ProviderId = 'claude' | 'codex' | 'planner';
 export type SessionStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'imported' | 'unavailable';
 
 export interface DevHubWorkspace { id:string; name:string; createdAt:number; updatedAt:number; }

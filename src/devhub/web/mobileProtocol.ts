@@ -17,9 +17,9 @@ export type MobileOnlyMessage=
 export type MobileMessage=WebviewMessage|MobileOnlyMessage;
 
 /** Starting a new chat is CLI-only: the planner isn't opened from a project. */
-const NEW_PROVIDERS=new Set(['claude']);
+const NEW_PROVIDERS=new Set(['claude','codex']);
 /** Reopening an existing session works for every provider, planner included — docs/DESIGN.md promises exactly this. */
-const PROVIDERS=new Set(['claude','planner']);
+const PROVIDERS=new Set(['claude','codex','planner']);
 const id=(v:any,max=400)=>typeof v==='string'&&v.length>0&&v.length<=max?v:undefined;
 
 export function parseMobileMessage(input:any):MobileMessage|undefined{
